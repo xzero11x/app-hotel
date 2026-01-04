@@ -1,0 +1,173 @@
+import { SidebarTrigger } from '@/components/ui/sidebar'
+import { Separator } from '@/components/ui/separator'
+import {
+    Breadcrumb,
+    BreadcrumbItem,
+    BreadcrumbLink,
+    BreadcrumbList,
+    BreadcrumbPage,
+    BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { createClient } from '@/lib/supabase/server'
+import { Bed, Calendar, Users, Receipt } from 'lucide-react'
+
+async function getStats() {
+    const supabase = await createClient()
+
+    // Habitaciones disponibles
+    const { count: habitacionesDisponibles } = await supabase
+        .from('habitaciones')
+        .select('*', { count: 'exact', head: true })
+        .eq('estado_ocupacion', 'DISPONIBLE')
+
+    // Estadías activas
+    const { count: estadiasActivas } = await supabase
+        .from('estadias')
+        .select('*', { count: 'exact', head: true })
+        .eq('estado', 'ACTIVA')
+
+    // Reservas del día
+    const hoy = new Date().toISOString().split('T')[0]
+    const { count: reservasHoy } = await supabase
+        .from('reservas')
+        .select('*', { count: 'exact', head: true })
+        .eq('fecha_llegada', hoy)
+        .eq('estado', 'CONFIRMADA')
+
+    // Total huéspedes
+    const { count: totalHuespedes } = await supabase
+        .from('huespedes')
+        .select('*', { count: 'exact', head: true })
+
+    return {
+        habitacionesDisponibles: habitacionesDisponibles || 0,
+        estadiasActivas: estadiasActivas || 0,
+        reservasHoy: reservasHoy || 0,
+        totalHuespedes: totalHuespedes || 0,
+    }
+}
+
+export default async function DashboardPage() {
+    const stats = await getStats()
+
+    return (
+        <>
+            <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+                <SidebarTrigger className="-ml-1" />
+                <Separator orientation="vertical" className="mr-2 h-4" />
+                <Breadcrumb>
+                    <BreadcrumbList>
+                        <BreadcrumbItem>
+                            <BreadcrumbPage>Dashboard</BreadcrumbPage>
+                        </BreadcrumbItem>
+                    </BreadcrumbList>
+                </Breadcrumb>
+            </header>
+            <div className="flex flex-1 flex-col gap-4 p-4">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Habitaciones Disponibles
+                            </CardTitle>
+                            <Bed className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{stats.habitacionesDisponibles}</div>
+                            <p className="text-xs text-muted-foreground">
+                                Listas para check-in
+                            </p>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Estadías Activas
+                            </CardTitle>
+                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{stats.estadiasActivas}</div>
+                            <p className="text-xs text-muted-foreground">
+                                Huéspedes alojados
+                            </p>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Reservas Hoy
+                            </CardTitle>
+                            <Receipt className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{stats.reservasHoy}</div>
+                            <p className="text-xs text-muted-foreground">
+                                Check-ins esperados
+                            </p>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Total Huéspedes
+                            </CardTitle>
+                            <Users className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{stats.totalHuespedes}</div>
+                            <p className="text-xs text-muted-foreground">
+                                En la base de datos
+                            </p>
+                        </CardContent>
+                    </Card>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Bienvenido al Dashboard</CardTitle>
+                            <CardDescription>
+                                Sistema de gestión hotelera
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-sm text-muted-foreground">
+                                Aquí encontrarás un resumen de la operación diaria del hotel.
+                                Usa el menú lateral para navegar entre las diferentes secciones.
+                            </p>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Accesos Rápidos</CardTitle>
+                            <CardDescription>
+                                Tareas comunes
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                            <a
+                                href="/reservas/nueva"
+                                className="block rounded-lg border p-3 hover:bg-accent transition-colors"
+                            >
+                                <div className="font-medium">Nueva Reserva</div>
+                                <div className="text-sm text-muted-foreground">
+                                    Registrar una nueva reserva
+                                </div>
+                            </a>
+                            <a
+                                href="/habitaciones"
+                                className="block rounded-lg border p-3 hover:bg-accent transition-colors"
+                            >
+                                <div className="font-medium">Ver Habitaciones</div>
+                                <div className="text-sm text-muted-foreground">
+                                    Estado y disponibilidad
+                                </div>
+                            </a>
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
+        </>
+    )
+}

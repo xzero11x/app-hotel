@@ -59,17 +59,154 @@ WHERE c.nombre = 'Estándar'
 ON CONFLICT DO NOTHING;
 
 -- =============================================
--- 4. USUARIO ADMINISTRADOR
+-- 4. HABITACIONES
 -- =============================================
-INSERT INTO public.usuarios (id, rol, nombres, apellidos, estado)
-VALUES (
-    '0930db09-44f0-4f3b-bc74-1209bbbe7b32',
-    'ADMIN',
-    'Administrador',
-    'Sistema',
-    true
-)
-ON CONFLICT (id) DO UPDATE 
-SET rol = 'ADMIN', estado = true;
 
-SELECT 'Seed completado' AS message;
+-- PISO 1: 2 Simples + 3 Matrimoniales
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '101', '1', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Simple' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '102', '1', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Simple' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '103', '1', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Matrimonial' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '104', '1', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Matrimonial' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '105', '1', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Matrimonial' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+-- PISO 2: 2 Simples + 3 Matrimoniales
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '201', '2', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Simple' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '202', '2', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Simple' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '203', '2', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Matrimonial' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '204', '2', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Matrimonial' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '205', '2', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Matrimonial' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+-- Una habitación de cada tipo restante (Doble, Doble 4P, Triple, Triple 5P)
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '301', '3', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Doble' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '302', '3', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Doble 4P' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '303', '3', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Triple' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO public.habitaciones (numero, piso, tipo_id, categoria_id, estado_ocupacion, estado_limpieza, estado_servicio)
+SELECT 
+    '304', '3', t.id, c.id, 'LIBRE', 'LIMPIA', 'OPERATIVA'
+FROM public.tipos_habitacion t
+CROSS JOIN public.categorias_habitacion c
+WHERE t.nombre = 'Triple 5P' AND c.nombre = 'Estándar'
+ON CONFLICT (numero) DO NOTHING;
+
+-- =============================================
+-- 5. CAJAS
+-- =============================================
+INSERT INTO public.cajas (nombre, estado) VALUES
+('Caja Principal', true)
+ON CONFLICT DO NOTHING;
+
+-- =============================================
+-- 6. SERIES DE COMPROBANTES
+-- =============================================
+-- Series para Boletas
+INSERT INTO public.series_comprobante (caja_id, tipo_comprobante, serie, correlativo_actual)
+SELECT c.id, 'BOLETA', 'B001', 0
+FROM public.cajas c
+WHERE c.nombre = 'Caja Principal'
+ON CONFLICT (serie, tipo_comprobante) DO NOTHING;
+
+-- Series para Facturas
+INSERT INTO public.series_comprobante (caja_id, tipo_comprobante, serie, correlativo_actual)
+SELECT c.id, 'FACTURA', 'F001', 0
+FROM public.cajas c
+WHERE c.nombre = 'Caja Principal'
+ON CONFLICT (serie, tipo_comprobante) DO NOTHING;
+
+-- Series para Notas de Crédito
+INSERT INTO public.series_comprobante (caja_id, tipo_comprobante, serie, correlativo_actual)
+SELECT c.id, 'NOTA_CREDITO', 'NC01', 0
+FROM public.cajas c
+WHERE c.nombre = 'Caja Principal'
+ON CONFLICT (serie, tipo_comprobante) DO NOTHING;
+
+-- Confirmación
+SELECT '✅ Seed completado: 14 habitaciones, 1 caja y 3 series creadas' AS resultado;

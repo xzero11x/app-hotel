@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { GridCell } from './grid-cell'
 import { ReservationBlock } from './reservation-block'
+import { RoomContextMenu } from '../context-menu/room-context-menu'
 import type { RackHabitacion, RackReserva } from '@/lib/actions/rack'
 
 type Props = {
@@ -120,21 +121,23 @@ export function RoomRow({ habitacion, days, reservas, startDate, onReservationCl
   }
 
   return (
-    <>
-      {/* Room info cell (sticky) */}
-      <div className="sticky left-0 z-10 border-b border-r bg-background p-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-semibold">{habitacion.numero}</div>
-            <div className="text-xs text-muted-foreground">
-              {habitacion.tipos_habitacion.nombre}
+<>
+      {/* Room info cell (sticky) con menú contextual */}
+      <RoomContextMenu habitacion={habitacion} onUpdate={onUpdate}>
+        <div className="sticky left-0 z-10 border-b border-r bg-background p-2 cursor-context-menu">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-semibold">{habitacion.numero}</div>
+              <div className="text-xs text-muted-foreground">
+                {habitacion.tipos_habitacion.nombre}
+              </div>
+            </div>
+            <div className="text-xs">
+              {getStatusBadge(habitacion.estado_limpieza)}
             </div>
           </div>
-          <div className="text-xs">
-            {getStatusBadge(habitacion.estado_limpieza)}
-          </div>
         </div>
-      </div>
+      </RoomContextMenu>
 
       {/* Day cells */}
       {days.map((day, index) => {

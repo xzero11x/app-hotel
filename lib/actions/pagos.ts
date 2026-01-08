@@ -42,7 +42,7 @@ async function getTurnoActivo(usuario_id: string): Promise<string | null> {
     .from('caja_turnos')
     .select('id')
     .eq('usuario_id', usuario_id)
-    .eq('estado', 'ABIERTO')
+    .eq('estado', 'ABIERTA')
     .order('fecha_apertura', { ascending: false })
     .limit(1)
     .single()

@@ -16,15 +16,15 @@ import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { 
   getDetalleReserva, 
-  getHuespedesDeReserva, 
-  getPagosDeReserva,
+  getHuespedesDeReserva,
   type OcupacionReserva 
 } from '@/lib/actions/ocupaciones'
+import { getPagosByReserva } from '@/lib/actions/pagos'
+import { realizarCheckin } from '@/lib/actions/checkin'
 import { 
-  realizarCheckin,
   realizarCheckout,
   validarCheckout
-} from '@/lib/actions/checkin'
+} from '@/lib/actions/checkout'
 import { registrarPago, getTotalPagado, getSaldoPendiente } from '@/lib/actions/pagos'
 import { 
   DoorOpen, 
@@ -106,7 +106,7 @@ export function ReservationDetailSheet({ reservaId, open, onOpenChange }: Reserv
       const [detalleData, huespedesData, pagosData] = await Promise.all([
         getDetalleReserva(reservaId),
         getHuespedesDeReserva(reservaId),
-        getPagosDeReserva(reservaId)
+        getPagosByReserva(reservaId)
       ])
       
       setReserva(detalleData)
@@ -153,7 +153,10 @@ export function ReservationDetailSheet({ reservaId, open, onOpenChange }: Reserv
         return
       }
       
-      await realizarCheckout(reserva.id, forceCheckout)
+      await realizarCheckout({ 
+        reserva_id: reserva.id, 
+        forzar_checkout: forceCheckout 
+      })
       toast.success('Check-out realizado exitosamente')
       await cargarDatos()
       setCheckoutDialogOpen(false)
@@ -179,13 +182,14 @@ export function ReservationDetailSheet({ reservaId, open, onOpenChange }: Reserv
 
     try {
       setActionLoading(true)
-      await registrarPago(
-        reserva.id,
+      await registrarPago({
+        reserva_id: reserva.id,
+        caja_turno_id: '', // Se obtendrá automáticamente
         monto,
-        metodoPago,
-        referenciaPago || undefined,
-        notaPago || undefined
-      )
+        metodo_pago: metodoPago as 'EFECTIVO' | 'TARJETA' | 'TRANSFERENCIA' | 'YAPE' | 'PLIN' | 'OTRO',
+        referencia_pago: referenciaPago || undefined,
+        nota: notaPago || undefined
+      })
       
       toast.success('Pago registrado exitosamente')
       

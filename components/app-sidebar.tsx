@@ -13,6 +13,7 @@ import {
   LogOut,
   Wallet,
   History,
+  UserCircle,
 } from 'lucide-react'
 
 import { NavMain } from '@/components/nav-main'
@@ -47,6 +48,16 @@ const navItems = [
     title: 'Ocupaciones',
     url: '/ocupaciones',
     icon: Users,
+  },
+  {
+    title: 'Huéspedes',
+    url: '/huespedes',
+    icon: UserCircle,
+  },
+  {
+    title: 'Facturación',
+    url: '/facturacion',
+    icon: Receipt,
   },
   {
     title: 'Cajas',

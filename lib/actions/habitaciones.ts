@@ -137,15 +137,15 @@ export async function updateEstadoHabitacion(id: string, estado: string) {
 export async function deleteHabitacion(id: string) {
     const supabase = await createClient()
 
-    // Verificar si tiene estadías activas
+    // Verificar si tiene reservas activas (CHECKED_IN)
     const { count } = await supabase
-        .from('estadias')
+        .from('reservas')
         .select('*', { count: 'exact', head: true })
         .eq('habitacion_id', id)
-        .eq('estado', 'ACTIVA')
+        .eq('estado', 'CHECKED_IN')
 
     if (count && count > 0) {
-        return { error: 'No se puede eliminar. La habitación tiene estadías activas.' }
+        return { error: 'No se puede eliminar. La habitación tiene reservas activas (check-in).' }
     }
 
     const { error } = await supabase

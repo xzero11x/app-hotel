@@ -27,8 +27,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { LogIn, CreditCard, XCircle, Loader2, LogOut } from 'lucide-react'
-import { checkInRapido, cancelarReserva } from '@/lib/actions/rack'
+import { realizarCheckin } from '@/lib/actions/checkin'
 import { realizarCheckout, validarCheckout } from '@/lib/actions/checkout'
+import { cancelarReserva } from '@/lib/actions/reservas'
 import { registrarPago } from '@/lib/actions/pagos'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -60,8 +61,13 @@ export function ReservationContextMenu({ children, reserva, onUpdate }: Props) {
     
     setProcesando(true)
     try {
-      await checkInRapido(reserva.id)
-      onUpdate()
+      const result = await realizarCheckin(reserva.id)
+      
+      if (result.error) {
+        alert(`Error: ${result.message || result.error}`)
+      } else {
+        onUpdate()
+      }
     } catch (error) {
       console.error('Error en check-in:', error)
       alert('Error al hacer check-in')
@@ -73,9 +79,14 @@ export function ReservationContextMenu({ children, reserva, onUpdate }: Props) {
   const handleCancelarReserva = async () => {
     setProcesando(true)
     try {
-      await cancelarReserva(reserva.id)
-      setCancelarDialogOpen(false)
-      onUpdate()
+      const result = await cancelarReserva(reserva.id)
+      
+      if (result.error) {
+        alert(`Error: ${result.message || result.error}`)
+      } else {
+        setCancelarDialogOpen(false)
+        onUpdate()
+      }
     } catch (error) {
       console.error('Error al cancelar:', error)
       alert('Error al cancelar la reserva')

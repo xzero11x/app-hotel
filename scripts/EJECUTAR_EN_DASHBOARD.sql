@@ -177,6 +177,8 @@ CREATE TABLE public.huespedes (
     correo text,
     telefono text,
     fecha_nacimiento date,
+    notas_internas text,
+    es_frecuente boolean DEFAULT false,
     created_at timestamptz DEFAULT now(),
     UNIQUE(tipo_documento, numero_documento)
 );
@@ -381,6 +383,29 @@ CREATE TRIGGER update_hotel_config_modtime BEFORE UPDATE ON public.hotel_configu
 CREATE TRIGGER trg_gestion_estados_reserva BEFORE UPDATE ON public.reservas FOR EACH ROW EXECUTE PROCEDURE sincronizar_estado_habitacion();
 CREATE TRIGGER trg_validar_checkin BEFORE UPDATE ON public.reservas FOR EACH ROW EXECUTE PROCEDURE validar_checkin_habitacion();
 
+
+-- Función para proteger inmutabilidad de comprobantes
+CREATE OR REPLACE FUNCTION proteger_comprobante_inmutable()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Si el comprobante ya fue aceptado o enviado, NO permitir cambios en datos fiscales
+    IF (OLD.estado_sunat != 'PENDIENTE') THEN
+        IF OLD.total_venta IS DISTINCT FROM NEW.total_venta
+           OR OLD.receptor_nro_doc IS DISTINCT FROM NEW.receptor_nro_doc
+           OR OLD.serie IS DISTINCT FROM NEW.serie 
+           OR OLD.numero IS DISTINCT FROM NEW.numero THEN
+            RAISE EXCEPTION '⛔ PROHIBIDO: No se pueden modificar datos fiscales de un comprobante emitido.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_blindaje_fiscal
+BEFORE UPDATE ON public.comprobantes
+FOR EACH ROW
+EXECUTE FUNCTION proteger_comprobante_inmutable();
+
 -- =============================================
 -- 6. VISTAS
 -- =============================================
@@ -456,6 +481,100 @@ LEFT JOIN public.reserva_huespedes rh ON r.id = rh.reserva_id AND rh.es_titular 
 LEFT JOIN public.huespedes hue ON rh.huesped_id = hue.id
 WHERE r.estado IN ('RESERVADA', 'CHECKED_IN', 'CHECKED_OUT')
 ORDER BY r.fecha_entrada DESC;
+
+
+
+-- Vista de Historial de Facturación (Snapshot Reader con Contexto Inteligente)
+CREATE OR REPLACE VIEW public.vw_historial_comprobantes AS
+SELECT 
+    c.id,
+    c.fecha_emision,
+    c.tipo_comprobante,
+    c.serie,
+    c.numero,
+    c.serie || '-' || LPAD(c.numero::text, 8, '0') as numero_completo,
+    
+    -- DATOS SNAPSHOT (Lectura segura)
+    c.receptor_razon_social as cliente_nombre,
+    c.receptor_tipo_doc,
+    c.receptor_nro_doc as cliente_doc,
+    c.moneda,
+    c.total_venta,
+    c.estado_sunat,
+    c.xml_url,
+    c.cdr_url,
+    
+    -- CONTEXTO INTELIGENTE (Lógica Condicional)
+    CASE 
+        -- Caso A: Es una Nota de Crédito (anula otro comprobante)
+        WHEN c.tipo_comprobante = 'NOTA_CREDITO' AND c.nota_credito_ref_id IS NOT NULL THEN
+            'Anula a ' || (
+                SELECT ref.serie || '-' || LPAD(ref.numero::text, 8, '0')
+                FROM public.comprobantes ref
+                WHERE ref.id = c.nota_credito_ref_id
+            )
+        -- Caso B: Es una venta normal con reserva
+        WHEN c.reserva_id IS NOT NULL THEN
+            'Hab ' || (
+                SELECT h.numero 
+                FROM public.reservas r
+                JOIN public.habitaciones h ON r.habitacion_id = h.id
+                WHERE r.id = c.reserva_id
+            ) || ' (' || (
+                SELECT 
+                    CASE r.estado
+                        WHEN 'RESERVADA' THEN 'Reservado'
+                        WHEN 'CHECKED_IN' THEN 'Hospedado'
+                        WHEN 'CHECKED_OUT' THEN 'Check-out'
+                        ELSE r.estado::text
+                    END
+                FROM public.reservas r
+                WHERE r.id = c.reserva_id
+            ) || ')'
+        -- Caso C: Comprobante sin contexto
+        ELSE 'Sin contexto'
+    END as contexto,
+    
+    -- IDs y datos de auditoría
+    c.reserva_id,
+    ct.usuario_id,
+    u.nombres || ' ' || COALESCE(u.apellidos, '') as emisor_nombre,
+    c.created_at
+FROM public.comprobantes c
+JOIN public.caja_turnos ct ON c.turno_caja_id = ct.id
+JOIN public.usuarios u ON ct.usuario_id = u.id
+ORDER BY c.fecha_emision DESC, c.numero DESC;
+
+
+-- 2. Índices para búsqueda y joins rápidos
+CREATE INDEX IF NOT EXISTS idx_huespedes_busqueda 
+ON public.huespedes USING gin(
+  to_tsvector('spanish', nombres || ' ' || apellidos || ' ' || numero_documento)
+);
+
+CREATE INDEX IF NOT EXISTS idx_huespedes_documento 
+ON public.huespedes(tipo_documento, numero_documento);
+
+CREATE INDEX IF NOT EXISTS idx_huespedes_frecuente 
+ON public.huespedes(es_frecuente) WHERE es_frecuente = true;
+
+CREATE INDEX IF NOT EXISTS idx_huespedes_con_notas 
+ON public.huespedes(id) WHERE notas_internas IS NOT NULL;
+
+-- 3. Índices en tablas relacionadas para queries específicas
+CREATE INDEX IF NOT EXISTS idx_reserva_huespedes_huesped 
+ON public.reserva_huespedes(huesped_id);
+
+CREATE INDEX IF NOT EXISTS idx_reservas_fecha_salida 
+ON public.reservas(fecha_salida DESC);
+
+-- 4. Comentarios para documentación
+COMMENT ON COLUMN public.huespedes.notas_internas IS 'Notas de recepción: alertas, preferencias, incidentes';
+COMMENT ON COLUMN public.huespedes.es_frecuente IS 'Marcador VIP para clientes recurrentes (>= 3 visitas)';
+
+-- Confirmación
+SELECT '✅ Migración de Huéspedes completada (versión optimizada)' AS resultado;
+
 
 -- =============================================
 -- 7. PERMISOS (CRÍTICO)

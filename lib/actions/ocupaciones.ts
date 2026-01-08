@@ -17,18 +17,22 @@ export type OcupacionReserva = {
   huesped_presente: boolean
   
   // Habitación
+  habitacion_id: string
   habitacion_numero: string
   habitacion_piso: string
   tipo_habitacion: string
+  categoria_habitacion: string
   
   // Huésped titular
+  titular_id: string
   titular_nombre: string
   titular_tipo_doc: string
   titular_numero_doc: string
   titular_correo: string | null
   titular_telefono: string | null
+  titular_nacionalidad: string | null
   
-  // Financiero
+  // Financiero (calculado en backend)
   total_estimado: number
   total_pagado: number
   saldo_pendiente: number
@@ -47,22 +51,29 @@ export type FiltroOcupaciones = {
 }
 
 // ========================================
+// HELPER: CALCULAR TOTAL ESTIMADO
+// ========================================
+function calcularTotalEstimado(precio_pactado: number, fecha_entrada: string, fecha_salida: string): number {
+  const entrada = new Date(fecha_entrada)
+  const salida = new Date(fecha_salida)
+  const noches = Math.max(1, Math.floor((salida.getTime() - entrada.getTime()) / (1000 * 60 * 60 * 24)))
+  return precio_pactado * noches
+}
+
+// ========================================
 // OBTENER OCUPACIONES ACTUALES
 // ========================================
 export async function getOcupacionesActuales(filtros?: FiltroOcupaciones) {
   const supabase = await createClient()
 
+  // 1️⃣ Obtener datos básicos de la vista simplificada
   let query = supabase
-    .from('vw_reservas_con_deuda')
+    .from('vw_reservas_con_datos_basicos')
     .select('*')
 
   // Aplicar filtros
   if (filtros?.estado && filtros.estado !== 'TODAS') {
     query = query.eq('estado', filtros.estado)
-  }
-
-  if (filtros?.solo_con_deuda) {
-    query = query.gt('saldo_pendiente', 0)
   }
 
   if (filtros?.habitacion) {
@@ -73,18 +84,68 @@ export async function getOcupacionesActuales(filtros?: FiltroOcupaciones) {
     query = query.ilike('titular_nombre', `%${filtros.huesped}%`)
   }
 
-  // Ordenar por estado: primero deudores, luego check-in, luego reservas
-  query = query.order('saldo_pendiente', { ascending: false })
   query = query.order('fecha_entrada', { ascending: false })
 
-  const { data, error } = await query
+  const { data: reservas, error } = await query
 
   if (error) {
     console.error('Error al obtener ocupaciones:', error)
     throw new Error('Error al cargar ocupaciones')
   }
 
-  return data as OcupacionReserva[]
+  if (!reservas || reservas.length === 0) {
+    return []
+  }
+
+  // 2️⃣ Obtener pagos de todas las reservas (batch query)
+  const reservasIds = reservas.map(r => r.id)
+  const { data: pagos, error: pagosError } = await supabase
+    .from('pagos')
+    .select('reserva_id, monto')
+    .in('reserva_id', reservasIds)
+
+  if (pagosError) {
+    console.error('Error al obtener pagos:', pagosError)
+  }
+
+  // 3️⃣ Calcular totales en memoria (batch processing)
+  const pagosPorReserva: Record<string, number> = {}
+  pagos?.forEach(p => {
+    pagosPorReserva[p.reserva_id] = (pagosPorReserva[p.reserva_id] || 0) + p.monto
+  })
+
+  // 4️⃣ Mapear reservas con cálculos financieros
+  const ocupaciones: OcupacionReserva[] = reservas.map(r => {
+    const total_estimado = calcularTotalEstimado(r.precio_pactado, r.fecha_entrada, r.fecha_salida)
+    const total_pagado = pagosPorReserva[r.id] || 0
+    const saldo_pendiente = total_estimado - total_pagado
+    const entrada = new Date(r.fecha_entrada)
+    const salida = new Date(r.fecha_salida)
+    const total_noches = Math.max(1, Math.floor((salida.getTime() - entrada.getTime()) / (1000 * 60 * 60 * 24)))
+
+    return {
+      ...r,
+      total_estimado,
+      total_pagado,
+      saldo_pendiente,
+      total_noches
+    }
+  })
+
+  // 5️⃣ Aplicar filtro de deuda (después de calcular)
+  let ocupacionesFiltradas = ocupaciones
+  if (filtros?.solo_con_deuda) {
+    ocupacionesFiltradas = ocupaciones.filter(o => o.saldo_pendiente > 0)
+  }
+
+  // 6️⃣ Ordenar: primero deudores, luego por fecha
+  ocupacionesFiltradas.sort((a, b) => {
+    if (a.saldo_pendiente > 0 && b.saldo_pendiente <= 0) return -1
+    if (a.saldo_pendiente <= 0 && b.saldo_pendiente > 0) return 1
+    return new Date(b.fecha_entrada).getTime() - new Date(a.fecha_entrada).getTime()
+  })
+
+  return ocupacionesFiltradas
 }
 
 // ========================================
@@ -93,9 +154,10 @@ export async function getOcupacionesActuales(filtros?: FiltroOcupaciones) {
 export async function getEstadisticasOcupaciones() {
   const supabase = await createClient()
 
+  // Obtener todas las reservas activas
   const { data, error } = await supabase
-    .from('vw_reservas_con_deuda')
-    .select('estado, saldo_pendiente')
+    .from('vw_reservas_con_datos_basicos')
+    .select('id, estado, precio_pactado, fecha_entrada, fecha_salida')
 
   if (error) {
     console.error('Error al obtener estadísticas:', error)
@@ -108,12 +170,40 @@ export async function getEstadisticasOcupaciones() {
     }
   }
 
+  // Obtener todos los pagos
+  const reservasIds = data.map(r => r.id)
+  const { data: pagos } = await supabase
+    .from('pagos')
+    .select('reserva_id, monto')
+    .in('reserva_id', reservasIds)
+
+  // Calcular pagos por reserva
+  const pagosPorReserva: Record<string, number> = {}
+  pagos?.forEach(p => {
+    pagosPorReserva[p.reserva_id] = (pagosPorReserva[p.reserva_id] || 0) + p.monto
+  })
+
+  // Calcular estadísticas
+  let monto_total_deuda = 0
+  let total_con_deuda = 0
+
+  data.forEach(r => {
+    const total_estimado = calcularTotalEstimado(r.precio_pactado, r.fecha_entrada, r.fecha_salida)
+    const total_pagado = pagosPorReserva[r.id] || 0
+    const saldo = total_estimado - total_pagado
+    
+    if (saldo > 0) {
+      total_con_deuda++
+      monto_total_deuda += saldo
+    }
+  })
+
   const stats = {
     total_reservas: data.filter(r => r.estado === 'RESERVADA').length,
     total_checkins: data.filter(r => r.estado === 'CHECKED_IN').length,
     total_checkouts: data.filter(r => r.estado === 'CHECKED_OUT').length,
-    total_con_deuda: data.filter(r => r.saldo_pendiente > 0).length,
-    monto_total_deuda: data.reduce((sum, r) => sum + (r.saldo_pendiente || 0), 0)
+    total_con_deuda,
+    monto_total_deuda
   }
 
   return stats
@@ -125,8 +215,9 @@ export async function getEstadisticasOcupaciones() {
 export async function getDetalleReserva(reserva_id: string) {
   const supabase = await createClient()
 
-  const { data, error } = await supabase
-    .from('vw_reservas_con_deuda')
+  // Obtener datos básicos
+  const { data: reserva, error } = await supabase
+    .from('vw_reservas_con_datos_basicos')
     .select('*')
     .eq('id', reserva_id)
     .single()
@@ -136,7 +227,27 @@ export async function getDetalleReserva(reserva_id: string) {
     throw new Error('Error al cargar detalle de reserva')
   }
 
-  return data as OcupacionReserva
+  // Obtener pagos
+  const { data: pagos } = await supabase
+    .from('pagos')
+    .select('monto')
+    .eq('reserva_id', reserva_id)
+
+  // Calcular totales
+  const total_estimado = calcularTotalEstimado(reserva.precio_pactado, reserva.fecha_entrada, reserva.fecha_salida)
+  const total_pagado = pagos?.reduce((sum, p) => sum + p.monto, 0) || 0
+  const saldo_pendiente = total_estimado - total_pagado
+  const entrada = new Date(reserva.fecha_entrada)
+  const salida = new Date(reserva.fecha_salida)
+  const total_noches = Math.max(1, Math.floor((salida.getTime() - entrada.getTime()) / (1000 * 60 * 60 * 24)))
+
+  return {
+    ...reserva,
+    total_estimado,
+    total_pagado,
+    saldo_pendiente,
+    total_noches
+  } as OcupacionReserva
 }
 
 // ========================================
@@ -171,34 +282,6 @@ export async function getHuespedesDeReserva(reserva_id: string) {
   return data
 }
 
-// ========================================
-// OBTENER PAGOS DE UNA RESERVA
-// ========================================
-export async function getPagosDeReserva(reserva_id: string) {
-  const supabase = await createClient()
+// NOTA: getPagosDeReserva ha sido movido a lib/actions/pagos.ts (getPagosByReserva)
+// para evitar duplicación. Importar desde allí si se necesita.
 
-  const { data, error } = await supabase
-    .from('pagos')
-    .select(`
-      id,
-      monto,
-      metodo_pago,
-      referencia_pago,
-      nota,
-      fecha_pago,
-      comprobante_id,
-      comprobantes (
-        numero_completo:serie || '-' || numero,
-        tipo_comprobante
-      )
-    `)
-    .eq('reserva_id', reserva_id)
-    .order('fecha_pago', { ascending: false })
-
-  if (error) {
-    console.error('Error al obtener pagos:', error)
-    return []
-  }
-
-  return data
-}

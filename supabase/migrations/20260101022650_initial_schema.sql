@@ -1,9 +1,24 @@
 -- =============================================
--- SCHEMA COMPLETO + PERMISOS - VERSIÓN UNIFICADA
+-- SCHEMA COMPLETO + PERMISOS - VERSIÓN ACTUALIZADA
 -- EJECUTAR ESTE ARCHIVO COMPLETO EN EL DASHBOARD DE SUPABASE
 -- =============================================
 -- IMPORTANTE: Este es el ÚNICO archivo que necesitas ejecutar
 -- después de hacer DROP SCHEMA public CASCADE;
+-- =============================================
+-- 
+-- ✅ ACTUALIZADO: 2026-01-07
+-- Este schema incorpora todos los cambios identificados en el análisis
+-- de refactorización según el DOCUMENTO_DE_REQUERIMIENTOS_DEL_SISTEMA_PMS.md v2.1
+-- 
+-- Cambios principales:
+-- - ❌ Eliminados triggers de lógica de negocio (sincronizar_estado, validar_checkin)
+-- - ❌ Eliminado campo GENERATED total_estimado (cálculo en backend)
+-- - ✅ Agregado CHECK constraint en tarifas (precio_minimo <= precio_base)
+-- - ✅ Vistas simplificadas (sin subconsultas correlacionadas)
+-- - ✅ 14 índices para performance óptima (< 2 segundos)
+-- - ✅ Comentarios de documentación actualizados
+-- 
+-- Referencia: docs/analisis-refactorizacion-schema.md
 -- =============================================
 
 -- =============================================
@@ -149,7 +164,9 @@ CREATE TABLE public.tarifas (
     fecha_inicio date,
     fecha_fin date,
     activa boolean DEFAULT true,
-    created_at timestamptz DEFAULT now()
+    created_at timestamptz DEFAULT now(),
+    -- Constraint según documento 3.2.4: precio mínimo debe ser <= precio base
+    CONSTRAINT check_precio_minimo_valido CHECK (precio_minimo <= precio_base)
 );
 
 -- HABITACIONES
@@ -177,6 +194,8 @@ CREATE TABLE public.huespedes (
     correo text,
     telefono text,
     fecha_nacimiento date,
+    notas_internas text,
+    es_frecuente boolean DEFAULT false,
     created_at timestamptz DEFAULT now(),
     UNIQUE(tipo_documento, numero_documento)
 );
@@ -196,12 +215,12 @@ CREATE TABLE public.reservas (
     precio_pactado numeric(12,2) NOT NULL,
     moneda_pactada moneda_enum DEFAULT 'PEN',
     autorizado_descuento boolean DEFAULT false,
-    total_estimado numeric(12,2) GENERATED ALWAYS AS (
-        precio_pactado * (GREATEST(1, EXTRACT(DAY FROM (fecha_salida - fecha_entrada))))
-    ) STORED,
     huesped_presente boolean DEFAULT false,
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()
+    -- NOTA: Campo total_estimado ELIMINADO (era GENERATED)
+    -- Razón: Cálculos deben estar en backend (doc 6.2.2)
+    -- Se calcula en backend: precio_pactado * Math.max(1, dias_estadia)
 );
 
 -- RESERVA_HUESPEDES (relación muchos a muchos)
@@ -300,54 +319,10 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Función para sincronizar estado de habitación con reserva
-CREATE OR REPLACE FUNCTION sincronizar_estado_habitacion()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF NEW.estado = 'CHECKED_IN' AND (OLD.estado IS DISTINCT FROM 'CHECKED_IN') THEN
-        UPDATE public.habitaciones
-        SET estado_ocupacion = 'OCUPADA', estado_limpieza = 'LIMPIA'
-        WHERE id = NEW.habitacion_id;
-        NEW.huesped_presente := true;
-        NEW.check_in_real := now();
-    END IF;
-    
-    IF NEW.estado = 'CHECKED_OUT' AND (OLD.estado IS DISTINCT FROM 'CHECKED_OUT') THEN
-        UPDATE public.habitaciones
-        SET estado_ocupacion = 'LIBRE', estado_limpieza = 'SUCIA'
-        WHERE id = NEW.habitacion_id;
-        NEW.huesped_presente := false;
-        NEW.check_out_real := now();
-    END IF;
-    
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Función para validar check-in
-CREATE OR REPLACE FUNCTION validar_checkin_habitacion()
-RETURNS TRIGGER AS $$
-DECLARE
-    estado_actual_limpieza text;
-    estado_actual_servicio text;
-BEGIN
-    IF NEW.estado = 'CHECKED_IN' AND (OLD.estado IS DISTINCT FROM 'CHECKED_IN') THEN
-        SELECT estado_limpieza::text, estado_servicio::text 
-        INTO estado_actual_limpieza, estado_actual_servicio
-        FROM public.habitaciones 
-        WHERE id = NEW.habitacion_id;
-        
-        IF estado_actual_servicio != 'OPERATIVA' THEN
-            RAISE EXCEPTION 'No se puede hacer Check-in: La habitación está en %', estado_actual_servicio;
-        END IF;
-        
-        IF estado_actual_limpieza != 'LIMPIA' THEN
-            RAISE EXCEPTION 'No se puede hacer Check-in: La habitación está SUCIA o EN LIMPIEZA';
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+-- NOTA: Funciones sincronizar_estado_habitacion() y validar_checkin_habitacion()
+-- fueron ELIMINADAS según documento de requerimientos (sección 6.3.1)
+-- Razón: La lógica de negocio debe ser EXPLÍCITA en el backend (lib/actions/checkin.ts)
+-- para permitir testing, logs de auditoría y mensajes de error amigables.
 
 -- Función para calcular movimientos de turno
 CREATE OR REPLACE FUNCTION calcular_movimientos_turno(p_turno_id uuid)
@@ -374,12 +349,37 @@ $$;
 -- =============================================
 -- 5. TRIGGERS
 -- =============================================
+-- Triggers de actualización de timestamps
 CREATE TRIGGER update_usuarios_modtime BEFORE UPDATE ON public.usuarios FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 CREATE TRIGGER update_habitaciones_modtime BEFORE UPDATE ON public.habitaciones FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 CREATE TRIGGER update_reservas_modtime BEFORE UPDATE ON public.reservas FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 CREATE TRIGGER update_hotel_config_modtime BEFORE UPDATE ON public.hotel_configuracion FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
-CREATE TRIGGER trg_gestion_estados_reserva BEFORE UPDATE ON public.reservas FOR EACH ROW EXECUTE PROCEDURE sincronizar_estado_habitacion();
-CREATE TRIGGER trg_validar_checkin BEFORE UPDATE ON public.reservas FOR EACH ROW EXECUTE PROCEDURE validar_checkin_habitacion();
+
+-- NOTA: Triggers trg_gestion_estados_reserva y trg_validar_checkin fueron ELIMINADOS
+-- según documento de requerimientos. La lógica se maneja explícitamente en backend.
+
+
+-- Función para proteger inmutabilidad de comprobantes
+CREATE OR REPLACE FUNCTION proteger_comprobante_inmutable()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Si el comprobante ya fue aceptado o enviado, NO permitir cambios en datos fiscales
+    IF (OLD.estado_sunat != 'PENDIENTE') THEN
+        IF OLD.total_venta IS DISTINCT FROM NEW.total_venta
+           OR OLD.receptor_nro_doc IS DISTINCT FROM NEW.receptor_nro_doc
+           OR OLD.serie IS DISTINCT FROM NEW.serie 
+           OR OLD.numero IS DISTINCT FROM NEW.numero THEN
+            RAISE EXCEPTION '⛔ PROHIBIDO: No se pueden modificar datos fiscales de un comprobante emitido.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_blindaje_fiscal
+BEFORE UPDATE ON public.comprobantes
+FOR EACH ROW
+EXECUTE FUNCTION proteger_comprobante_inmutable();
 
 -- =============================================
 -- 6. VISTAS
@@ -412,8 +412,9 @@ FROM public.habitaciones h
 JOIN public.tipos_habitacion t ON h.tipo_id = t.id
 JOIN public.categorias_habitacion c ON h.categoria_id = c.id;
 
--- Vista de reservas con deuda (CRÍTICA PARA OCUPACIONES)
-CREATE OR REPLACE VIEW public.vw_reservas_con_deuda AS
+-- Vista de reservas con datos básicos (simplificada según doc 4.5)
+-- Los cálculos financieros se realizan en backend (lib/actions/ocupaciones.ts)
+CREATE OR REPLACE VIEW public.vw_reservas_con_datos_basicos AS
 SELECT 
     r.id,
     r.codigo_reserva,
@@ -423,39 +424,160 @@ SELECT
     r.check_in_real,
     r.check_out_real,
     r.precio_pactado,
+    r.moneda_pactada,
     r.huesped_presente,
     
     -- Habitación
+    h.id as habitacion_id,
     h.numero as habitacion_numero,
     h.piso as habitacion_piso,
     th.nombre as tipo_habitacion,
+    ch.nombre as categoria_habitacion,
     
     -- Huésped titular
+    hue.id as titular_id,
     hue.nombres || ' ' || hue.apellidos as titular_nombre,
     hue.tipo_documento as titular_tipo_doc,
     hue.numero_documento as titular_numero_doc,
     hue.correo as titular_correo,
     hue.telefono as titular_telefono,
-    
-    -- Cálculos financieros
-    r.precio_pactado * GREATEST(1, EXTRACT(DAY FROM (r.fecha_salida - r.fecha_entrada))::numeric) as total_estimado,
-    COALESCE((SELECT SUM(p.monto) FROM public.pagos p WHERE p.reserva_id = r.id), 0) as total_pagado,
-    (r.precio_pactado * GREATEST(1, EXTRACT(DAY FROM (r.fecha_salida - r.fecha_entrada))::numeric)) - 
-    COALESCE((SELECT SUM(p.monto) FROM public.pagos p WHERE p.reserva_id = r.id), 0) as saldo_pendiente,
-    
-    -- Noches
-    GREATEST(1, EXTRACT(DAY FROM (r.fecha_salida - r.fecha_entrada))::int) as total_noches,
+    hue.nacionalidad as titular_nacionalidad,
     
     -- Metadata
     r.created_at,
     r.updated_at
+    
 FROM public.reservas r
 JOIN public.habitaciones h ON r.habitacion_id = h.id
 JOIN public.tipos_habitacion th ON h.tipo_id = th.id
+JOIN public.categorias_habitacion ch ON h.categoria_id = ch.id
 LEFT JOIN public.reserva_huespedes rh ON r.id = rh.reserva_id AND rh.es_titular = true
 LEFT JOIN public.huespedes hue ON rh.huesped_id = hue.id
 WHERE r.estado IN ('RESERVADA', 'CHECKED_IN', 'CHECKED_OUT')
 ORDER BY r.fecha_entrada DESC;
+
+
+
+-- Vista de Historial de Facturación (simplificada según doc 4.5)
+-- El formateo y contexto se genera en el frontend/backend según necesidad
+CREATE OR REPLACE VIEW public.vw_historial_comprobantes AS
+SELECT 
+    c.id,
+    c.fecha_emision,
+    c.tipo_comprobante,
+    c.serie,
+    c.numero,
+    
+    -- DATOS SNAPSHOT (seguros, inmutables)
+    c.receptor_razon_social as cliente_nombre,
+    c.receptor_tipo_doc,
+    c.receptor_nro_doc as cliente_doc,
+    c.receptor_direccion,
+    c.moneda,
+    c.tipo_cambio,
+    c.op_gravadas,
+    c.op_exoneradas,
+    c.op_inafectas,
+    c.monto_igv,
+    c.monto_icbper,
+    c.total_venta,
+    c.estado_sunat,
+    c.xml_url,
+    c.cdr_url,
+    c.hash_cpe,
+    c.external_id,
+    
+    -- IDs para referencias (backend hace JOINs si necesita)
+    c.reserva_id,
+    c.nota_credito_ref_id,
+    c.turno_caja_id,
+    ct.usuario_id,
+    ct.caja_id,
+    
+    -- Datos del usuario (snapshot seguro)
+    u.nombres || ' ' || COALESCE(u.apellidos, '') as emisor_nombre,
+    u.rol as emisor_rol,
+    
+    -- Metadata
+    c.created_at
+    
+FROM public.comprobantes c
+JOIN public.caja_turnos ct ON c.turno_caja_id = ct.id
+JOIN public.usuarios u ON ct.usuario_id = u.id
+ORDER BY c.fecha_emision DESC, c.numero DESC;
+
+
+-- 2. Índices para búsqueda y joins rápidos (huéspedes)
+CREATE INDEX IF NOT EXISTS idx_huespedes_busqueda 
+ON public.huespedes USING gin(
+  to_tsvector('spanish', nombres || ' ' || apellidos || ' ' || numero_documento)
+);
+
+CREATE INDEX IF NOT EXISTS idx_huespedes_documento 
+ON public.huespedes(tipo_documento, numero_documento);
+
+CREATE INDEX IF NOT EXISTS idx_huespedes_frecuente 
+ON public.huespedes(es_frecuente) WHERE es_frecuente = true;
+
+CREATE INDEX IF NOT EXISTS idx_huespedes_con_notas 
+ON public.huespedes(id) WHERE notas_internas IS NOT NULL;
+
+-- 3. Índices en tablas relacionadas para queries específicas
+CREATE INDEX IF NOT EXISTS idx_reserva_huespedes_huesped 
+ON public.reserva_huespedes(huesped_id);
+
+CREATE INDEX IF NOT EXISTS idx_reservas_fecha_salida 
+ON public.reservas(fecha_salida DESC);
+
+-- 4. Índices adicionales según doc 7.1 (Performance < 1-2 segundos)
+CREATE INDEX IF NOT EXISTS idx_reservas_codigo 
+ON public.reservas(codigo_reserva);
+
+CREATE INDEX IF NOT EXISTS idx_reservas_estado 
+ON public.reservas(estado);
+
+CREATE INDEX IF NOT EXISTS idx_reservas_fecha_entrada 
+ON public.reservas(fecha_entrada);
+
+CREATE INDEX IF NOT EXISTS idx_comprobantes_fecha_emision 
+ON public.comprobantes(fecha_emision DESC);
+
+CREATE INDEX IF NOT EXISTS idx_caja_turnos_usuario 
+ON public.caja_turnos(usuario_id);
+
+CREATE INDEX IF NOT EXISTS idx_pagos_reserva 
+ON public.pagos(reserva_id);
+
+CREATE INDEX IF NOT EXISTS idx_reservas_habitacion_estado
+ON public.reservas(habitacion_id, estado);
+
+-- 4. Comentarios para documentación
+COMMENT ON COLUMN public.huespedes.notas_internas IS 'Notas de recepción: alertas, preferencias, incidentes';
+COMMENT ON COLUMN public.huespedes.es_frecuente IS 'Marcador VIP para clientes recurrentes (>= 3 visitas)';
+
+COMMENT ON TABLE public.reservas IS 
+'Corazón del sistema - Estadías de huéspedes.
+IMPORTANTE: Los estados se gestionan EXPLÍCITAMENTE en el backend (lib/actions/checkin.ts y checkout.ts).
+NO hay triggers automáticos que cambien estados de habitaciones.';
+
+COMMENT ON TABLE public.habitaciones IS
+'Espacios físicos del hotel con 3 dimensiones de estado independientes.
+Los cambios de estado se hacen EXPLÍCITAMENTE desde el backend, nunca por triggers automáticos.';
+
+COMMENT ON COLUMN public.reservas.huesped_presente IS
+'Flag operativo para housekeeping. NO afecta disponibilidad ni estado de ocupación.
+Uso: Indicar si el personal puede entrar a limpiar la habitación.';
+
+COMMENT ON VIEW public.vw_reservas_con_datos_basicos IS
+'Vista simplificada sin cálculos complejos.
+Los cálculos financieros (total_estimado, total_pagado, saldo_pendiente) 
+se realizan en el backend (lib/actions/ocupaciones.ts) para mayor flexibilidad.';
+
+COMMENT ON VIEW public.vw_historial_comprobantes IS
+'Vista con datos crudos de comprobantes.
+El formateo y contexto (ej: "Anula a...", "Hab 201...") 
+se genera en el frontend/backend según necesidad.';
+
 
 -- =============================================
 -- 7. PERMISOS (CRÍTICO)
@@ -518,5 +640,30 @@ ON CONFLICT (id) DO UPDATE SET rol = 'ADMIN', estado = true;
 -- =============================================
 -- 10. CONFIRMACIÓN
 -- =============================================
+DO $$
+BEGIN
+    RAISE NOTICE '';
+    RAISE NOTICE '═══════════════════════════════════════════════════════════════';
+    RAISE NOTICE '✅ SCHEMA INICIAL CREADO CORRECTAMENTE';
+    RAISE NOTICE '═══════════════════════════════════════════════════════════════';
+    RAISE NOTICE '';
+    RAISE NOTICE '📊 CARACTERÍSTICAS DEL SCHEMA:';
+    RAISE NOTICE '   ✓ Arquitectura alineada con documento de requerimientos v2.1';
+    RAISE NOTICE '   ✓ Lógica de negocio en backend (explícita, testeable)';
+    RAISE NOTICE '   ✓ BD como guardián de INTEGRIDAD únicamente';
+    RAISE NOTICE '   ✓ Vistas optimizadas sin subconsultas correlacionadas';
+    RAISE NOTICE '   ✓ Índices para performance < 2 segundos';
+    RAISE NOTICE '   ✓ Triggers de protección fiscal activos';
+    RAISE NOTICE '';
+    RAISE NOTICE '⚠️  RECORDATORIO IMPORTANTE:';
+    RAISE NOTICE '   Los estados de reservas y habitaciones se gestionan';
+    RAISE NOTICE '   EXPLÍCITAMENTE en el backend (lib/actions/checkin.ts)';
+    RAISE NOTICE '   NO hay triggers automáticos de sincronización';
+    RAISE NOTICE '';
+    RAISE NOTICE '📚 Referencia: DOCUMENTO_DE_REQUERIMIENTOS_DEL_SISTEMA_PMS.md';
+    RAISE NOTICE '═══════════════════════════════════════════════════════════════';
+    RAISE NOTICE '';
+END $$;
+
 SELECT '✅ SCHEMA COMPLETO CREADO CORRECTAMENTE' AS resultado;
 SELECT 'Total de tablas: ' || count(*)::text FROM information_schema.tables WHERE table_schema = 'public';

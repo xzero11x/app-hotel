@@ -11,8 +11,8 @@ export async function buscarHuespedPorDocumento(numDoc: string, tipoDoc: string 
         const { data, error } = await supabase
             .from('huespedes')
             .select('*')
-            .eq('num_doc', numDoc)
-            .eq('tipo_doc', tipoDoc)
+            .eq('numero_documento', numDoc)
+            .eq('tipo_documento', tipoDoc)
             .single()
 
         if (error && error.code !== 'PGRST116') {
@@ -27,11 +27,11 @@ export async function buscarHuespedPorDocumento(numDoc: string, tipoDoc: string 
 
 // Schema para crear/actualizar huésped
 const huespedSchema = z.object({
-    tipo_doc: z.string(),
-    num_doc: z.string().min(1, 'El número de documento es requerido'),
+    tipo_documento: z.string(),
+    numero_documento: z.string().min(1, 'El número de documento es requerido'),
     nombres: z.string().min(1, 'Los nombres son requeridos'),
     apellidos: z.string().min(1, 'Los apellidos son requeridos'),
-    email: z.string().email('Email inválido').optional().nullable(),
+    correo: z.string().email('Email inválido').optional().nullable(),
     telefono: z.string().optional().nullable(),
     nacionalidad: z.string().optional().nullable(),
     ciudad_procedencia: z.string().optional().nullable(),
@@ -48,8 +48,8 @@ export async function crearOActualizarHuesped(data: any) {
         const { data: existing } = await supabase
             .from('huespedes')
             .select('id')
-            .eq('num_doc', validated.num_doc)
-            .eq('tipo_doc', validated.tipo_doc)
+            .eq('numero_documento', validated.numero_documento)
+            .eq('tipo_documento', validated.tipo_documento)
             .single()
 
         if (existing) {
@@ -58,7 +58,6 @@ export async function crearOActualizarHuesped(data: any) {
                 .from('huespedes')
                 .update({
                     ...validated,
-                    es_frecuente: true, // Marcarlo como frecuente
                 })
                 .eq('id', existing.id)
                 .select()
@@ -75,7 +74,6 @@ export async function crearOActualizarHuesped(data: any) {
                 .from('huespedes')
                 .insert({
                     ...validated,
-                    es_frecuente: false,
                 })
                 .select()
                 .single()
@@ -94,32 +92,33 @@ export async function crearOActualizarHuesped(data: any) {
     }
 }
 
-// Schema para crear estadía
-const estadiaSchema = z.object({
+// Schema para crear reserva con check-in inmediato
+const checkInSchema = z.object({
     habitacion_id: z.string().uuid(),
     huesped_principal_id: z.string().uuid(),
-    tarifa_id: z.string().uuid(),
-    fecha_ingreso: z.string(),
-    fecha_salida_prevista: z.string(),
-    precio_noche_final: z.number().positive(),
-    num_huespedes: z.number().int().positive(),
+    canal_venta_id: z.string().uuid().optional(),
+    fecha_entrada: z.string(),
+    fecha_salida: z.string(),
+    precio_pactado: z.number().positive(),
+    moneda_pactada: z.enum(['PEN', 'USD']).default('PEN'),
     acompanantes: z.array(z.object({
         nombres: z.string(),
         apellidos: z.string(),
-        tipo_doc: z.string(),
-        num_doc: z.string(),
+        tipo_documento: z.string(),
+        numero_documento: z.string(),
+        nacionalidad: z.string().optional(),
     })).optional(),
 })
 
 export async function crearCheckIn(data: any) {
     try {
-        const validated = estadiaSchema.parse(data)
+        const validated = checkInSchema.parse(data)
         const supabase = await createClient()
 
         // Verificar que la habitación esté disponible
         const { data: habitacion, error: habitacionError } = await supabase
             .from('habitaciones')
-            .select('estado_ocupacion')
+            .select('estado_ocupacion, estado_servicio')
             .eq('id', validated.habitacion_id)
             .single()
 
@@ -127,36 +126,45 @@ export async function crearCheckIn(data: any) {
             return { error: 'Habitación no encontrada' }
         }
 
-        if (habitacion.estado_ocupacion !== 'DISPONIBLE') {
+        if (habitacion.estado_ocupacion !== 'LIBRE') {
             return { error: 'La habitación no está disponible' }
         }
 
-        // Crear la estadía
-        const { data: estadia, error: estadiaError } = await supabase
-            .from('estadias')
+        if (habitacion.estado_servicio !== 'OPERATIVA') {
+            return { error: 'La habitación está fuera de servicio' }
+        }
+
+        // Generar código de reserva
+        const codigo_reserva = `RSV-${Date.now().toString().slice(-8)}`
+
+        // Crear la reserva con estado CHECKED_IN directamente
+        const { data: reserva, error: reservaError } = await supabase
+            .from('reservas')
             .insert({
+                codigo_reserva: codigo_reserva,
                 habitacion_id: validated.habitacion_id,
-                huesped_principal_id: validated.huesped_principal_id,
-                tarifa_id: validated.tarifa_id,
-                fecha_ingreso: validated.fecha_ingreso,
-                fecha_salida_prevista: validated.fecha_salida_prevista,
-                precio_noche_final: validated.precio_noche_final,
-                num_huespedes: validated.num_huespedes,
-                estado: 'ACTIVA',
+                canal_venta_id: validated.canal_venta_id,
+                fecha_entrada: validated.fecha_entrada,
+                fecha_salida: validated.fecha_salida,
+                precio_pactado: validated.precio_pactado,
+                moneda_pactada: validated.moneda_pactada,
+                estado: 'CHECKED_IN',
+                check_in_real: new Date().toISOString(),
+                huesped_presente: true,
             })
             .select()
             .single()
 
-        if (estadiaError) {
-            console.error('Error al crear estadía:', estadiaError)
-            return { error: 'Error al crear la estadía' }
+        if (reservaError) {
+            console.error('Error al crear reserva:', reservaError)
+            return { error: 'Error al crear la reserva con check-in' }
         }
 
         // Asociar huésped principal
         await supabase
-            .from('estadia_huespedes')
+            .from('reserva_huespedes')
             .insert({
-                estadia_id: estadia.id,
+                reserva_id: reserva.id,
                 huesped_id: validated.huesped_principal_id,
                 es_titular: true,
             })
@@ -168,8 +176,8 @@ export async function crearCheckIn(data: any) {
                 const { data: acompHuesped } = await supabase
                     .from('huespedes')
                     .select('id')
-                    .eq('num_doc', acomp.num_doc)
-                    .eq('tipo_doc', acomp.tipo_doc)
+                    .eq('numero_documento', acomp.numero_documento)
+                    .eq('tipo_documento', acomp.tipo_documento)
                     .single()
 
                 let acompId = acompHuesped?.id
@@ -180,8 +188,9 @@ export async function crearCheckIn(data: any) {
                         .insert({
                             nombres: acomp.nombres,
                             apellidos: acomp.apellidos,
-                            tipo_doc: acomp.tipo_doc,
-                            num_doc: acomp.num_doc,
+                            tipo_documento: acomp.tipo_documento,
+                            numero_documento: acomp.numero_documento,
+                            nacionalidad: acomp.nacionalidad || 'PE',
                         })
                         .select('id')
                         .single()
@@ -191,9 +200,9 @@ export async function crearCheckIn(data: any) {
 
                 if (acompId) {
                     await supabase
-                        .from('estadia_huespedes')
+                        .from('reserva_huespedes')
                         .insert({
-                            estadia_id: estadia.id,
+                            reserva_id: reserva.id,
                             huesped_id: acompId,
                             es_titular: false,
                         })
@@ -201,13 +210,18 @@ export async function crearCheckIn(data: any) {
             }
         }
 
-        // Actualizar estado de la habitación
+        // Actualizar estado de la habitación a OCUPADA + LIMPIA
+        // NOTA: Se marca LIMPIA porque el huésped acaba de entrar
+        // Se marcará SUCIA después del check-out
         await supabase
             .from('habitaciones')
-            .update({ estado_ocupacion: 'OCUPADA' })
+            .update({ 
+                estado_ocupacion: 'OCUPADA',
+                estado_limpieza: 'LIMPIA'
+            })
             .eq('id', validated.habitacion_id)
 
-        return { estadia }
+        return { reserva }
     } catch (error) {
         console.error('Error en crearCheckIn:', error)
         if (error instanceof z.ZodError) {
@@ -217,43 +231,13 @@ export async function crearCheckIn(data: any) {
     }
 }
 
-// Crear pago
-const pagoSchema = z.object({
-    estadia_id: z.string().uuid(),
-    monto: z.number().positive(),
-    metodo_pago: z.enum(['EFECTIVO', 'TARJETA', 'TRANSFERENCIA', 'YAPE', 'PLIN']),
-    concepto: z.string().optional(),
-})
+// NOTA: La función registrarPago ahora está en lib/actions/pagos.ts
+// Esta función aquí está deprecada y debe removerse
+// Usa: import { registrarPago } from '@/lib/actions/pagos'
 
-export async function registrarPago(data: any) {
-    try {
-        const validated = pagoSchema.parse(data)
-        const supabase = await createClient()
-
-        const { data: pago, error } = await supabase
-            .from('pagos')
-            .insert({
-                estadia_id: validated.estadia_id,
-                monto: validated.monto,
-                metodo_pago: validated.metodo_pago,
-                notas: validated.concepto || 'Pago de check-in',
-                fecha_pago: new Date().toISOString(),
-            })
-            .select()
-            .single()
-
-        if (error) {
-            console.error('Error detallado al registrar pago:', error)
-            return { error: `Error al registrar pago: ${error.message}` }
-        }
-
-        return { pago }
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return { error: error.issues[0].message }
-        }
-        return { error: 'Error al procesar pago' }
-    }
+export async function registrarPagoLegacy(data: any) {
+    console.warn('⚠️ registrarPagoLegacy está deprecada. Usa lib/actions/pagos.ts')
+    return { error: 'Esta función está deprecada. Usa lib/actions/pagos.ts' }
 }
 
 // Obtener habitaciones disponibles con sus tarifas
@@ -312,5 +296,125 @@ export async function getHabitacionesDisponibles() {
     } catch (error) {
         console.error('Error en getHabitacionesDisponibles:', error)
         return { error: 'Error al cargar habitaciones', habitaciones: [] }
+    }
+}
+
+// ========================================
+// REALIZAR CHECK-IN (Cambio de estado RESERVADA → CHECKED_IN)
+// ========================================
+// NOTA: Esta función implementa lógica EXPLÍCITA sin depender de triggers
+// según documento de requerimientos (sección 6.3.1)
+export async function realizarCheckin(reserva_id: string) {
+    const supabase = await createClient()
+
+    try {
+        // 1️⃣ OBTENER DATOS DE LA RESERVA
+        const { data: reserva, error: reservaError } = await supabase
+            .from('reservas')
+            .select('id, habitacion_id, estado')
+            .eq('id', reserva_id)
+            .single()
+
+        if (reservaError || !reserva) {
+            return { 
+                error: 'Reserva no encontrada',
+                code: 'RESERVA_NO_ENCONTRADA' 
+            }
+        }
+
+        // Validar que esté en estado RESERVADA
+        if (reserva.estado !== 'RESERVADA') {
+            return {
+                error: 'Estado inválido',
+                message: `No se puede hacer check-in. La reserva está en estado: ${reserva.estado}`,
+                code: 'ESTADO_INVALIDO'
+            }
+        }
+
+        // 2️⃣ VALIDAR HABITACIÓN
+        const { data: habitacion, error: habError } = await supabase
+            .from('habitaciones')
+            .select('estado_limpieza, estado_servicio, estado_ocupacion')
+            .eq('id', reserva.habitacion_id)
+            .single()
+
+        if (habError || !habitacion) {
+            return { 
+                error: 'Habitación no encontrada',
+                code: 'HABITACION_NO_ENCONTRADA' 
+            }
+        }
+
+        // Validar estado de servicio
+        if (habitacion.estado_servicio !== 'OPERATIVA') {
+            return {
+                error: 'Habitación no operativa',
+                message: `La habitación está en ${habitacion.estado_servicio}. Por favor, contacte a mantenimiento.`,
+                code: 'HABITACION_NO_OPERATIVA'
+            }
+        }
+
+        // Validar estado de limpieza
+        if (habitacion.estado_limpieza !== 'LIMPIA') {
+            return {
+                error: 'Habitación requiere limpieza',
+                message: 'Por favor, solicite al área de housekeeping que limpie la habitación primero.',
+                code: 'HABITACION_SUCIA'
+            }
+        }
+
+        // Validar que no esté ocupada (doble check)
+        if (habitacion.estado_ocupacion === 'OCUPADA') {
+            return {
+                error: 'Habitación ocupada',
+                message: 'La habitación ya está ocupada por otra reserva.',
+                code: 'HABITACION_OCUPADA'
+            }
+        }
+
+        // 3️⃣ ACTUALIZAR RESERVA (EXPLÍCITO)
+        const { error: updateReservaError } = await supabase
+            .from('reservas')
+            .update({ 
+                estado: 'CHECKED_IN',
+                check_in_real: new Date().toISOString(),
+                huesped_presente: true
+            })
+            .eq('id', reserva_id)
+
+        if (updateReservaError) {
+            throw new Error(`Error al actualizar reserva: ${updateReservaError.message}`)
+        }
+
+        // 4️⃣ ACTUALIZAR HABITACIÓN (EXPLÍCITO)
+        const { error: updateHabitacionError } = await supabase
+            .from('habitaciones')
+            .update({ 
+                estado_ocupacion: 'OCUPADA',
+                estado_limpieza: 'LIMPIA' // Mantiene limpia al entrar
+            })
+            .eq('id', reserva.habitacion_id)
+
+        if (updateHabitacionError) {
+            // Rollback: revertir estado de reserva
+            await supabase
+                .from('reservas')
+                .update({ estado: 'RESERVADA', check_in_real: null, huesped_presente: false })
+                .eq('id', reserva_id)
+            
+            throw new Error(`Error al actualizar habitación: ${updateHabitacionError.message}`)
+        }
+
+        return { 
+            success: true, 
+            message: 'Check-in realizado exitosamente' 
+        }
+    } catch (error: any) {
+        console.error('[realizarCheckin] Error:', error)
+        return {
+            error: 'Error de sistema',
+            message: 'Hubo un problema al procesar el check-in. Por favor, intente nuevamente.',
+            code: 'ERROR_SISTEMA'
+        }
     }
 }

@@ -41,7 +41,7 @@ export type Comprobante = {
 export type EmitirComprobanteInput = {
   reserva_id: string
   tipo_comprobante: 'BOLETA' | 'FACTURA'
-  serie_id: string
+  serie: string  // Serie como texto, ej: 'B001', 'F001'
   
   // Datos del cliente
   cliente_tipo_doc: 'DNI' | 'RUC' | 'PASAPORTE' | 'CE'
@@ -67,17 +67,16 @@ export type ComprobanteItem = {
 // ========================================
 // OBTENER SIGUIENTE CORRELATIVO (ATÓMICO)
 // ========================================
-async function obtenerSiguienteCorrelativo(serie_id: string): Promise<{
-  serie: string
+async function obtenerSiguienteCorrelativo(serie: string): Promise<{
   correlativo: number
   numero_completo: string
 }> {
   const supabase = await createClient()
 
   // Llamar a la función de Postgres que incrementa atómicamente
-  const { data, error } = await supabase
+  const { data: correlativo, error } = await supabase
     .rpc('obtener_siguiente_correlativo', {
-      p_serie_id: serie_id
+      p_serie: serie
     })
 
   if (error) {
@@ -85,26 +84,14 @@ async function obtenerSiguienteCorrelativo(serie_id: string): Promise<{
     throw new Error('Error al generar número de comprobante')
   }
 
-  if (!data) {
+  if (!correlativo) {
     throw new Error('No se pudo obtener correlativo')
   }
 
-  // Obtener datos de la serie para construir número completo
-  const { data: serieData, error: serieError } = await supabase
-    .from('series_comprobante')
-    .select('serie, correlativo_actual')
-    .eq('id', serie_id)
-    .single()
-
-  if (serieError || !serieData) {
-    throw new Error('Error al obtener datos de la serie')
-  }
-
-  const numero_completo = `${serieData.serie}-${serieData.correlativo_actual.toString().padStart(8, '0')}`
+  const numero_completo = `${serie}-${correlativo.toString().padStart(8, '0')}`
 
   return {
-    serie: serieData.serie,
-    correlativo: serieData.correlativo_actual,
+    correlativo: correlativo,
     numero_completo
   }
 }
@@ -115,10 +102,15 @@ async function obtenerSiguienteCorrelativo(serie_id: string): Promise<{
 export async function emitirComprobante(input: EmitirComprobanteInput) {
   const supabase = await createClient()
 
-  // 1. Obtener usuario actual
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    throw new Error('Usuario no autenticado')
+  // 1. Obtener turno de caja activo
+  const { data: turnoActivo, error: turnoError } = await supabase
+    .from('caja_turnos')
+    .select('id')
+    .eq('estado', 'ABIERTA')
+    .single()
+
+  if (turnoError || !turnoActivo) {
+    throw new Error('No hay un turno de caja activo')
   }
 
   // 2. Validar que la reserva existe
@@ -138,39 +130,39 @@ export async function emitirComprobante(input: EmitirComprobanteInput) {
   }
 
   // 4. Calcular montos
-  const subtotal = input.items.reduce((sum, item) => sum + item.subtotal, 0)
-  const igv = subtotal * 0.18 // 18% IGV
-  const total = subtotal + igv
+  const op_gravadas = input.items.reduce((sum, item) => sum + item.subtotal, 0)
+  const monto_igv = op_gravadas * 0.18 // 18% IGV
+  const total_venta = op_gravadas + monto_igv
 
   // 5. Obtener siguiente correlativo (atómico)
-  const { serie, correlativo, numero_completo } = await obtenerSiguienteCorrelativo(input.serie_id)
+  const { correlativo, numero_completo } = await obtenerSiguienteCorrelativo(input.serie)
 
   // 6. Crear comprobante
   const { data: comprobante, error: comprobanteError } = await supabase
     .from('comprobantes')
     .insert({
-      serie_id: input.serie_id,
+      turno_caja_id: turnoActivo.id,
+      reserva_id: input.reserva_id,
       tipo_comprobante: input.tipo_comprobante,
-      serie_numero: serie,
-      correlativo: correlativo,
-      numero_completo: numero_completo,
+      serie: input.serie,
+      numero: correlativo,
       
-      cliente_tipo_doc: input.cliente_tipo_doc,
-      cliente_numero_doc: input.cliente_numero_doc,
-      cliente_nombre: input.cliente_nombre,
-      cliente_direccion: input.cliente_direccion,
+      receptor_tipo_doc: input.cliente_tipo_doc,
+      receptor_nro_doc: input.cliente_numero_doc,
+      receptor_razon_social: input.cliente_nombre,
+      receptor_direccion: input.cliente_direccion,
       
-      subtotal: subtotal,
-      igv: igv,
-      total: total,
       moneda: 'PEN',
+      tipo_cambio: 1.000,
+      op_gravadas: op_gravadas,
+      op_exoneradas: 0.00,
+      op_inafectas: 0.00,
+      monto_igv: monto_igv,
+      monto_icbper: 0.00,
+      total_venta: total_venta,
       
       estado_sunat: 'PENDIENTE',
       fecha_emision: new Date().toISOString(),
-      usuario_emisor_id: user.id,
-      reserva_id: input.reserva_id,
-      
-      observaciones: input.observaciones
     })
     .select()
     .single()
@@ -191,7 +183,7 @@ export async function emitirComprobante(input: EmitirComprobanteInput) {
   }))
 
   const { error: itemsError } = await supabase
-    .from('comprobante_items')
+    .from('comprobante_detalles')
     .insert(itemsToInsert)
 
   if (itemsError) {
@@ -214,6 +206,141 @@ export async function emitirComprobante(input: EmitirComprobanteInput) {
 }
 
 // ========================================
+// OBTENER HISTORIAL COMPLETO DE COMPROBANTES
+// ========================================
+export async function getHistorialComprobantes(filtros?: {
+  tipo_comprobante?: 'BOLETA' | 'FACTURA' | 'NOTA_CREDITO' | 'TODAS'
+  estado_sunat?: 'PENDIENTE' | 'ACEPTADO' | 'RECHAZADO' | 'ANULADO' | 'TODOS'
+  fecha_desde?: string
+  fecha_hasta?: string
+  busqueda?: string
+}) {
+  const supabase = await createClient()
+
+  let query = supabase
+    .from('vw_historial_comprobantes')
+    .select('*')
+
+  // Aplicar filtros
+  if (filtros?.tipo_comprobante && filtros.tipo_comprobante !== 'TODAS') {
+    query = query.eq('tipo_comprobante', filtros.tipo_comprobante)
+  }
+
+  if (filtros?.estado_sunat && filtros.estado_sunat !== 'TODOS') {
+    query = query.eq('estado_sunat', filtros.estado_sunat)
+  }
+
+  if (filtros?.fecha_desde) {
+    query = query.gte('fecha_emision', filtros.fecha_desde)
+  }
+
+  if (filtros?.fecha_hasta) {
+    query = query.lte('fecha_emision', filtros.fecha_hasta)
+  }
+
+  if (filtros?.busqueda) {
+    query = query.or(`cliente_nombre.ilike.%${filtros.busqueda}%,numero_completo.ilike.%${filtros.busqueda}%,cliente_doc.ilike.%${filtros.busqueda}%`)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error('Error al obtener historial:', error)
+    throw new Error('Error al cargar historial de comprobantes')
+  }
+
+  return data || []
+}
+
+// ========================================
+// OBTENER DETALLE COMPLETO DE UN COMPROBANTE
+// ========================================
+export async function getDetalleComprobante(comprobante_id: string) {
+  const supabase = await createClient()
+
+  // 1. Obtener datos del comprobante
+  const { data: comprobante, error: comprobanteError } = await supabase
+    .from('comprobantes')
+    .select(`
+      *,
+      reservas (
+        codigo_reserva,
+        habitaciones (
+          numero,
+          piso
+        )
+      )
+    `)
+    .eq('id', comprobante_id)
+    .single()
+
+  if (comprobanteError || !comprobante) {
+    throw new Error('Comprobante no encontrado')
+  }
+
+  // 2. Obtener items/detalles
+  const { data: detalles, error: detallesError } = await supabase
+    .from('comprobante_detalles')
+    .select('*')
+    .eq('comprobante_id', comprobante_id)
+    .order('id', { ascending: true })
+
+  if (detallesError) {
+    console.error('Error al obtener detalles:', detallesError)
+    throw new Error('Error al cargar detalles del comprobante')
+  }
+
+  return {
+    comprobante,
+    detalles: detalles || []
+  }
+}
+
+// ========================================
+// OBTENER ESTADÍSTICAS DE FACTURACIÓN
+// ========================================
+export async function getEstadisticasFacturacion(fecha_desde?: string, fecha_hasta?: string) {
+  const supabase = await createClient()
+
+  let query = supabase
+    .from('vw_historial_comprobantes')
+    .select('tipo_comprobante, total_venta, estado_sunat')
+
+  if (fecha_desde) {
+    query = query.gte('fecha_emision', fecha_desde)
+  }
+
+  if (fecha_hasta) {
+    query = query.lte('fecha_emision', fecha_hasta)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error('Error al obtener estadísticas:', error)
+    return {
+      total_boletas: 0,
+      total_facturas: 0,
+      total_anuladas: 0,
+      total_pendientes: 0,
+      monto_total: 0
+    }
+  }
+
+  const stats = {
+    total_boletas: data.filter(c => c.tipo_comprobante === 'BOLETA' && c.estado_sunat !== 'ANULADO').length,
+    total_facturas: data.filter(c => c.tipo_comprobante === 'FACTURA' && c.estado_sunat !== 'ANULADO').length,
+    total_anuladas: data.filter(c => c.estado_sunat === 'ANULADO').length,
+    total_pendientes: data.filter(c => c.estado_sunat === 'PENDIENTE').length,
+    monto_total: data
+      .filter(c => c.estado_sunat !== 'ANULADO')
+      .reduce((sum, c) => sum + (c.total_venta || 0), 0)
+  }
+
+  return stats
+}
+
+// ========================================
 // OBTENER COMPROBANTES DE UNA RESERVA
 // ========================================
 export async function getComprobantesByReserva(reserva_id: string) {
@@ -227,7 +354,7 @@ export async function getComprobantesByReserva(reserva_id: string) {
         serie,
         tipo_comprobante
       ),
-      comprobante_items (
+      comprobante_detalles (
         descripcion,
         cantidad,
         precio_unitario,

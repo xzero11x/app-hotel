@@ -23,7 +23,7 @@ import { Sparkles, Wrench, Ban, Info, Key, UserCheck, UserX, SprayCan } from 'lu
 import { cambiarEstadoHabitacion } from '@/lib/actions/rack'
 import { toggleHuespedPresente } from '@/lib/actions/reservas'
 import { updateEstadoLimpieza } from '@/lib/actions/habitaciones'
-import type { RackHabitacion } from '@/lib/actions/rack'
+import type { RackHabitacion, RackReserva } from '@/lib/actions/rack'
 import { toast } from 'sonner'
 
 type Props = {
@@ -31,65 +31,144 @@ type Props = {
   habitacion: RackHabitacion
   reservaActiva?: { id: string, huesped_presente: boolean } | null
   onUpdate: () => void
+  // Funciones para actualizaciones optimistas
+  updateHabitacionOptimistic?: (habitacionId: string, updates: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+  revertHabitacionOptimistic?: (habitacionId: string, originalData: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+  updateReservaOptimistic?: (reservaId: string, updates: Partial<Pick<RackReserva, 'huesped_presente'>>) => void
 }
 
-export function RoomContextMenu({ children, habitacion, reservaActiva, onUpdate }: Props) {
+export function RoomContextMenu({ 
+  children, 
+  habitacion, 
+  reservaActiva, 
+  onUpdate,
+  updateHabitacionOptimistic,
+  revertHabitacionOptimistic,
+  updateReservaOptimistic,
+}: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogType, setDialogType] = useState<'limpiar' | 'mantenimiento' | 'bloquear' | null>(null)
   const [nota, setNota] = useState('')
   const [procesando, setProcesando] = useState(false)
 
+  // ==========================================
+  // ACTUALIZACIÓN OPTIMISTA DE LIMPIEZA
+  // La UI cambia INSTANTÁNEAMENTE, luego se confirma con el servidor
+  // ==========================================
   const handleUpdateLimpieza = async (estado: 'LIMPIA' | 'SUCIA') => {
     if (habitacion.estado_limpieza === estado) return
+
+    // Guardar estado original para rollback si falla
+    const estadoOriginal = habitacion.estado_limpieza
+
+    // 1. ACTUALIZACIÓN OPTIMISTA INMEDIATA (UI cambia al instante)
+    if (updateHabitacionOptimistic) {
+      updateHabitacionOptimistic(habitacion.id, { estado_limpieza: estado })
+    }
     
-    setProcesando(true)
+    // Toast sutil de confirmación visual
+    const toastId = toast.loading(
+      estado === 'LIMPIA' ? 'Marcando como limpia...' : 'Marcando como sucia...',
+      { duration: 1500 }
+    )
+
     try {
+      // 2. Enviar al servidor en background
       const result = await updateEstadoLimpieza(habitacion.id, estado)
+      
       if (result.success) {
-        toast.success(`Habitación marcada como ${estado}`)
-        onUpdate()
+        toast.success(
+          estado === 'LIMPIA' ? '✓ Habitación limpia' : '✓ Habitación marcada sucia',
+          { id: toastId, duration: 1500 }
+        )
+        // Realtime se encargará de sincronizar, no necesitamos refetch
       } else {
-        toast.error('Error al actualizar limpieza')
+        // 3. ROLLBACK si falla
+        if (revertHabitacionOptimistic) {
+          revertHabitacionOptimistic(habitacion.id, { estado_limpieza: estadoOriginal })
+        }
+        toast.error('Error al actualizar', { id: toastId })
       }
     } catch (error) {
+      // 3. ROLLBACK si hay error de red
       console.error('Error limpieza:', error)
-      toast.error('Error de conexión')
-    } finally {
-      setProcesando(false)
+      if (revertHabitacionOptimistic) {
+        revertHabitacionOptimistic(habitacion.id, { estado_limpieza: estadoOriginal })
+      }
+      toast.error('Error de conexión', { id: toastId })
     }
   }
 
+  // ==========================================
+  // ACTUALIZACIÓN OPTIMISTA DE PRESENCIA (LLAVE)
+  // ==========================================
   const handleTogglePresencia = async (presente: boolean) => {
     if (!reservaActiva) return
-    setProcesando(true)
+
+    // Guardar estado original
+    const estadoOriginal = reservaActiva.huesped_presente
+
+    // 1. ACTUALIZACIÓN OPTIMISTA INMEDIATA
+    if (updateReservaOptimistic) {
+      updateReservaOptimistic(reservaActiva.id, { huesped_presente: presente })
+    }
+
+    const toastId = toast.loading(
+      presente ? 'Entregando llave...' : 'Recibiendo llave...',
+      { duration: 1500 }
+    )
+
     try {
+      // 2. Enviar al servidor
       const result = await toggleHuespedPresente(reservaActiva.id, presente)
+      
       if (result.success) {
-        toast.success(presente ? 'Huésped marcado DENTRO' : 'Huésped marcado FUERA (Llave recibida)')
-        onUpdate()
+        toast.success(
+          presente ? '✓ Llave entregada' : '✓ Llave recibida',
+          { id: toastId, duration: 1500 }
+        )
       } else {
-        toast.error(result.error || 'Error al actualizar presencia')
+        // 3. ROLLBACK
+        if (updateReservaOptimistic) {
+          updateReservaOptimistic(reservaActiva.id, { huesped_presente: estadoOriginal })
+        }
+        toast.error(result.error || 'Error al actualizar', { id: toastId })
       }
     } catch (error) {
       console.error('Error presencia:', error)
-      toast.error('Error de conexión')
-    } finally {
-      setProcesando(false)
+      if (updateReservaOptimistic) {
+        updateReservaOptimistic(reservaActiva.id, { huesped_presente: estadoOriginal })
+      }
+      toast.error('Error de conexión', { id: toastId })
     }
   }
 
+  // ==========================================
+  // CAMBIAR ESTADO DE HABITACIÓN (Mantenimiento/Bloqueada)
+  // ==========================================
   const handleCambiarEstado = async (nuevoEstado: string) => {
-    setProcesando(true)
+    const estadoOriginal = habitacion.estado_servicio
+    
+    // Actualización optimista
+    if (updateHabitacionOptimistic) {
+      updateHabitacionOptimistic(habitacion.id, { 
+        estado_servicio: nuevoEstado as RackHabitacion['estado_servicio'] 
+      })
+    }
+
+    const toastId = toast.loading('Actualizando habitación...', { duration: 2000 })
+
     try {
       await cambiarEstadoHabitacion(habitacion.id, nuevoEstado, nota)
       setDialogOpen(false)
       setNota('')
-      onUpdate()
+      toast.success('✓ Estado actualizado', { id: toastId, duration: 1500 })
     } catch (error) {
       console.error('Error al cambiar estado:', error)
-      toast.error('Error al actualizar estado')
-    } finally {
-      setProcesando(false)
+      if (revertHabitacionOptimistic) {
+        revertHabitacionOptimistic(habitacion.id, { estado_servicio: estadoOriginal })
+      }
+      toast.error('Error al actualizar estado', { id: toastId })
     }
   }
 
@@ -130,12 +209,12 @@ export function RoomContextMenu({ children, habitacion, reservaActiva, onUpdate 
           {children}
         </ContextMenuTrigger>
         <ContextMenuContent className="w-64">
-          
+
           {/* SECCIÓN 1: CONTROL DE LLAVE (PRESENCIA) */}
           {reservaActiva && (
             <>
               {reservaActiva.huesped_presente ? (
-                <ContextMenuItem 
+                <ContextMenuItem
                   onClick={() => handleTogglePresencia(false)}
                   className="text-orange-600 focus:text-orange-700"
                 >
@@ -143,7 +222,7 @@ export function RoomContextMenu({ children, habitacion, reservaActiva, onUpdate 
                   Recibir Llave (Marcar Fuera)
                 </ContextMenuItem>
               ) : (
-                <ContextMenuItem 
+                <ContextMenuItem
                   onClick={() => handleTogglePresencia(true)}
                   className="text-green-600 focus:text-green-700"
                 >
@@ -167,7 +246,7 @@ export function RoomContextMenu({ children, habitacion, reservaActiva, onUpdate 
               Marcar como Sucia
             </ContextMenuItem>
           )}
-          
+
           <ContextMenuSeparator />
 
           {/* SECCIÓN 3: MANTENIMIENTO */}

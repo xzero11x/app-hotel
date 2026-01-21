@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { isToday, isSameDay, startOfDay, differenceInDays } from 'date-fns'
+import { isToday, isSameDay, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { GridCell } from './grid-cell'
@@ -20,9 +20,27 @@ type Props = {
   onNewReservation: (habitacion: RackHabitacion, fecha: Date, fechaFinal?: Date) => void
   onUpdate: () => void
   clearSelection?: boolean
+  // Funciones para actualizaciones optimistas
+  updateHabitacionOptimistic?: (habitacionId: string, updates: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+  revertHabitacionOptimistic?: (habitacionId: string, originalData: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+  updateReservaOptimistic?: (reservaId: string, updates: Partial<Pick<RackReserva, 'huesped_presente'>>) => void
+  removeReservaOptimistic?: (reservaId: string) => void
 }
 
-export function RoomRow({ habitacion, days, reservas, startDate, onReservationClick, onNewReservation, onUpdate, clearSelection }: Props) {
+export function RoomRow({
+  habitacion,
+  days,
+  reservas,
+  startDate,
+  onReservationClick,
+  onNewReservation,
+  onUpdate,
+  clearSelection,
+  updateHabitacionOptimistic,
+  revertHabitacionOptimistic,
+  updateReservaOptimistic,
+  removeReservaOptimistic,
+}: Props) {
   const [isDragging, setIsDragging] = useState(false)
   const [dragStartIndex, setDragStartIndex] = useState<number | null>(null)
   const [dragEndIndex, setDragEndIndex] = useState<number | null>(null)
@@ -51,7 +69,7 @@ export function RoomRow({ habitacion, days, reservas, startDate, onReservationCl
 
       // Verificar si este día es el primer día de la reserva
       if (isSameDay(cellDay, entrada)) {
-        const nights = differenceInDays(salida, entrada)
+        const nights = differenceInCalendarDays(salida, entrada)
         return { reserva, nights, isStart: true }
       }
 
@@ -133,6 +151,9 @@ export function RoomRow({ habitacion, days, reservas, startDate, onReservationCl
         habitacion={habitacion}
         reservaActiva={activeReservation ? { id: activeReservation.id, huesped_presente: activeReservation.huesped_presente } : null}
         onUpdate={onUpdate}
+        updateHabitacionOptimistic={updateHabitacionOptimistic}
+        revertHabitacionOptimistic={revertHabitacionOptimistic}
+        updateReservaOptimistic={updateReservaOptimistic}
       >
         <div className="sticky left-0 z-20 border-b border-r bg-background p-2 cursor-context-menu h-[80px]">
           <div className="flex items-start justify-between h-full">
@@ -152,7 +173,7 @@ export function RoomRow({ habitacion, days, reservas, startDate, onReservationCl
 
             {/* Lado derecho: Badges + Indicador */}
             <div className="flex flex-col items-end justify-between h-full">
-              {/* Badges solo si está ocupada */}
+              {/* Badges según estado */}
               {habitacion.estado_ocupacion === 'OCUPADA' ? (
                 <div className="flex flex-col items-end gap-1">
                   {/* Badge Huésped */}
@@ -174,8 +195,8 @@ export function RoomRow({ habitacion, days, reservas, startDate, onReservationCl
                   <Badge
                     variant="outline"
                     className={`${habitacion.estado_limpieza === 'SUCIA' ? 'bg-[#fecc1b] text-white border-0' :
-                        habitacion.estado_limpieza === 'EN_LIMPIEZA' ? 'bg-[#2B7FFF] text-white border-0' :
-                          'bg-[#2B7FFF] text-white border-0'
+                      habitacion.estado_limpieza === 'EN_LIMPIEZA' ? 'bg-[#2B7FFF] text-white border-0' :
+                        'bg-[#2B7FFF] text-white border-0'
                       } text-[10px] px-2 py-0.5 flex items-center gap-1`}
                   >
                     <Sparkles className="w-3 h-3" />
@@ -184,14 +205,27 @@ export function RoomRow({ habitacion, days, reservas, startDate, onReservationCl
                         'Limpia'}
                   </Badge>
                 </div>
+              ) : habitacion.estado_limpieza === 'SUCIA' || habitacion.estado_limpieza === 'EN_LIMPIEZA' ? (
+                /* Mostrar badge de limpieza en habitaciones LIBRES pero SUCIAS */
+                <div className="flex flex-col items-end gap-1">
+                  <Badge
+                    variant="outline"
+                    className={`${habitacion.estado_limpieza === 'SUCIA' ? 'bg-[#fecc1b] text-black border-0' :
+                      'bg-[#2B7FFF] text-white border-0'
+                      } text-[10px] px-2 py-0.5 flex items-center gap-1`}
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    {habitacion.estado_limpieza === 'SUCIA' ? 'Sucia' : 'Limpiando'}
+                  </Badge>
+                </div>
               ) : (
                 <div></div>
               )}
 
               {/* Círculo de estado de ocupación */}
               <div className={`w-4 h-4 rounded-full ${habitacion.estado_servicio !== 'OPERATIVA' ? 'bg-[#374151]' :
-                  habitacion.estado_ocupacion === 'OCUPADA' ? 'bg-[#f44250]' :
-                    'bg-[#6BD968]'
+                habitacion.estado_ocupacion === 'OCUPADA' ? 'bg-[#f44250]' :
+                  'bg-[#6BD968]'
                 }`}></div>
             </div>
           </div>
@@ -221,6 +255,8 @@ export function RoomRow({ habitacion, days, reservas, startDate, onReservationCl
                 nights={reservation.nights}
                 onClick={onReservationClick}
                 onUpdate={onUpdate}
+                updateHabitacionOptimistic={updateHabitacionOptimistic}
+                removeReservaOptimistic={removeReservaOptimistic}
               />
             )}
           </GridCell>

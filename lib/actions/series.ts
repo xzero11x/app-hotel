@@ -31,15 +31,17 @@ type Result<T = any> =
 
 /**
  * Validar formato de serie según tipo
- * Boletas: B001, B002, etc.
- * Facturas: F001, F002, etc.
- * Notas Crédito: NC01, NC02, etc.
+ * Formatos aceptados:
+ * - Boletas: B001, B002, BBB1, etc. (1-3 letras que empiecen con B + 1-3 números)
+ * - Facturas: F001, F002, FFF1, etc. (1-3 letras que empiecen con F + 1-3 números)
+ * - Notas Crédito: NC01, BC01, etc. (2-3 letras + 1-2 números)
+ * - Ticket Interno: TI01, TI001, etc.
  */
 function validarFormatoSerie(serie: string, tipo: TipoComprobante): boolean {
   const patterns: Record<TipoComprobante, RegExp> = {
-    BOLETA: /^B\d{3,4}$/,
-    FACTURA: /^F\d{3,4}$/,
-    NOTA_CREDITO: /^NC\d{2,3}$/,
+    BOLETA: /^B[A-Z]{0,2}\d{1,4}$/,         // B001, BBB1, BB01, etc.
+    FACTURA: /^F[A-Z]{0,2}\d{1,4}$/,        // F001, FFF1, FF01, etc.
+    NOTA_CREDITO: /^[BF][A-Z]{0,2}\d{1,3}$/, // BC01, FC01, BBB1, NC01, etc.
     TICKET_INTERNO: /^TI\d{2,4}$/,
   }
 

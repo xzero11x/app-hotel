@@ -31,9 +31,11 @@ type Props = {
   kpis: RackKPIs
   viewMode: 'rack' | 'cards'
   onViewModeChange: (mode: 'rack' | 'cards') => void
+  onSearchSelect?: (type: 'reserva' | 'huesped' | 'habitacion', id: string) => void
+  onNewReservation?: () => void
 }
 
-export function CommandBar({ kpis, viewMode, onViewModeChange }: Props) {
+export function CommandBar({ kpis, viewMode, onViewModeChange, onSearchSelect, onNewReservation }: Props) {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [showResults, setShowResults] = useState(false)
@@ -108,14 +110,14 @@ export function CommandBar({ kpis, viewMode, onViewModeChange }: Props) {
 
   return (
     <div className="border-b bg-background">
-      <div className="flex h-16 items-center px-4 gap-4">
+      <div className="flex h-14 sm:h-16 items-center px-2 sm:px-3 md:px-4 gap-2 sm:gap-3 md:gap-4">
 
         {/* Left: Trigger + Breadcrumb */}
-        <div className="flex items-center gap-2 min-w-fit">
+        <div className="flex items-center gap-1 sm:gap-2 min-w-fit">
           <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
+          <Separator orientation="vertical" className="mr-1 sm:mr-2 h-4" />
           <Breadcrumb>
-            <BreadcrumbList>
+            <BreadcrumbList className="text-xs sm:text-sm">
               <BreadcrumbItem className="hidden md:block">
                 <BreadcrumbLink href="/">Inicio</BreadcrumbLink>
               </BreadcrumbItem>
@@ -157,8 +159,9 @@ export function CommandBar({ kpis, viewMode, onViewModeChange }: Props) {
                         key={index}
                         className="w-full px-4 py-2 text-left hover:bg-accent flex items-center gap-3 transition-colors"
                         onClick={() => {
-                          // TODO: Implementar navegación
-                          console.log('Selected:', result)
+                          if (onSearchSelect && result.data?.id) {
+                            onSearchSelect(result.type, result.data.id)
+                          }
                           setShowResults(false)
                           setSearchQuery('')
                         }}
@@ -182,30 +185,31 @@ export function CommandBar({ kpis, viewMode, onViewModeChange }: Props) {
         </div>
 
         {/* Right side: KPIs + Actions */}
-        <div className="flex items-center gap-2 ml-auto">
-          {/* View Toggle */}
-          <ToggleGroup type="single" value={viewMode} onValueChange={(value) => value && onViewModeChange(value as 'rack' | 'cards')}>
-            <ToggleGroupItem value="rack" aria-label="Vista Rack" size="sm" className="h-8 w-8 p-0">
-              <LayoutList className="h-4 w-4" />
-            </ToggleGroupItem>
-            <ToggleGroupItem value="cards" aria-label="Vista Tarjetas" size="sm" className="h-8 w-8 p-0">
-              <LayoutGrid className="h-4 w-4" />
-            </ToggleGroupItem>
-          </ToggleGroup>
+        <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
+          {/* View Toggle - OCULTO EN MÓVIL (siempre cards en mobile) */}
+          <div className="hidden md:flex">
+            <ToggleGroup type="single" value={viewMode} onValueChange={(value) => value && onViewModeChange(value as 'rack' | 'cards')}>
+              <ToggleGroupItem value="rack" aria-label="Vista Rack" size="sm" className="h-8 w-8 p-0">
+                <LayoutList className="h-4 w-4" />
+              </ToggleGroupItem>
+              <ToggleGroupItem value="cards" aria-label="Vista Tarjetas" size="sm" className="h-8 w-8 p-0">
+                <LayoutGrid className="h-4 w-4" />
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
 
-          <div className="h-4 w-px bg-border mx-2 hidden sm:block" />
+          <div className="h-4 w-px bg-border mx-1 sm:mx-2 hidden md:block" />
 
-          <div className="hidden sm:block">
+          <div className="hidden lg:block">
             <KpiChips kpis={kpis} />
           </div>
 
-          <div className="h-4 w-px bg-border mx-2 hidden sm:block" />
+          <div className="h-4 w-px bg-border mx-1 sm:mx-2 hidden lg:block" />
 
           {/* New Reservation */}
-          <Button size="sm" className="h-8">
-            <Plus className="mr-2 h-4 w-4" />
+          <Button size="sm" className="h-8 text-xs sm:text-sm" onClick={onNewReservation}>
+            <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4 sm:mr-2" />
             <span className="hidden sm:inline">Nueva Reserva</span>
-            <span className="sm:hidden">Nueva</span>
           </Button>
         </div>
       </div>

@@ -14,6 +14,9 @@ type TurnoContextValue = {
     cajasDisponibles: Caja[]
     loadingCajas: boolean
     userId: string | null
+    // Modo observador (admin sin turno)
+    modoObservador: boolean
+    setModoObservador: (modo: boolean) => void
 }
 
 const TurnoContext = createContext<TurnoContextValue | null>(null)
@@ -24,6 +27,7 @@ export function TurnoProvider({ children }: { children: ReactNode }) {
     const [cajasDisponibles, setCajasDisponibles] = useState<Caja[]>([])
     const [loadingCajas, setLoadingCajas] = useState(false)
     const [userId, setUserId] = useState<string | null>(null)
+    const [modoObservador, setModoObservador] = useState(false)
     const channelRef = useRef<RealtimeChannel | null>(null)
 
     const fetchTurno = useCallback(async (showLoading = true) => {
@@ -105,7 +109,10 @@ export function TurnoProvider({ children }: { children: ReactNode }) {
         // Datos pre-cargados para el modal
         cajasDisponibles,
         loadingCajas,
-        userId
+        userId,
+        // Modo observador (solo lectura)
+        modoObservador,
+        setModoObservador
     }
 
     return (

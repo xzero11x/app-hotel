@@ -157,7 +157,7 @@ export async function getOcupacionesActuales(filtros?: FiltroOcupaciones) {
 export async function getEstadisticasOcupaciones() {
   const supabase = await createClient()
 
-  // Obtener todas las reservas activas
+  // Obtener TODAS las reservas del sistema (sin filtros)
   const { data, error } = await supabase
     .from('vw_reservas_con_datos_basicos')
     .select('id, estado, precio_pactado, fecha_entrada, fecha_salida')
@@ -165,6 +165,7 @@ export async function getEstadisticasOcupaciones() {
   if (error) {
     logger.error('Error al obtener estadísticas de ocupaciones', { action: 'getEstadisticasOcupaciones', originalError: getErrorMessage(error) })
     return {
+      total_todas: 0,
       total_reservas: 0,
       total_checkins: 0,
       total_checkouts: 0,
@@ -186,22 +187,26 @@ export async function getEstadisticasOcupaciones() {
     pagosPorReserva[p.reserva_id] = (pagosPorReserva[p.reserva_id] || 0) + p.monto
   })
 
-  // Calcular estadísticas
+  // Calcular deudas solo de reservas activas (RESERVADA y CHECKED_IN)
   let monto_total_deuda = 0
   let total_con_deuda = 0
 
   data.forEach(r => {
-    const total_estimado = calcularTotalEstimado(r.precio_pactado, r.fecha_entrada, r.fecha_salida)
-    const total_pagado = pagosPorReserva[r.id] || 0
-    const saldo = total_estimado - total_pagado
+    // Solo calcular deuda para reservas activas
+    if (r.estado === 'RESERVADA' || r.estado === 'CHECKED_IN') {
+      const total_estimado = calcularTotalEstimado(r.precio_pactado, r.fecha_entrada, r.fecha_salida)
+      const total_pagado = pagosPorReserva[r.id] || 0
+      const saldo = total_estimado - total_pagado
 
-    if (saldo > 0) {
-      total_con_deuda++
-      monto_total_deuda += saldo
+      if (saldo > 0.01) { // Tolerancia para decimales
+        total_con_deuda++
+        monto_total_deuda += saldo
+      }
     }
   })
 
   const stats = {
+    total_todas: data.length, // TODAS las reservas (incluye CANCELADA, NO_SHOW, etc.)
     total_reservas: data.filter(r => r.estado === 'RESERVADA').length,
     total_checkins: data.filter(r => r.estado === 'CHECKED_IN').length,
     total_checkouts: data.filter(r => r.estado === 'CHECKED_OUT').length,
@@ -270,6 +275,7 @@ export async function getHuespedesDeReserva(reserva_id: string) {
         tipo_documento,
         numero_documento,
         nacionalidad,
+        fecha_nacimiento,
         correo,
         telefono
       )
@@ -315,16 +321,22 @@ export async function getReservasHistorial(params: {
     query = query.eq('estado', estado)
   }
 
-  if (dateStart) {
-    query = query.gte('fecha_entrada', dateStart.toISOString())
-  }
-
-  if (dateEnd) {
+  // Filtro de fechas: buscar reservas que se solapen con el rango dado
+  // Una reserva se solapa si: fecha_entrada <= dateEnd AND fecha_salida >= dateStart
+  if (dateStart && dateEnd) {
+    // Rango completo: reservas que se solapan con el período
+    query = query.lte('fecha_entrada', dateEnd.toISOString())
+    query = query.gte('fecha_salida', dateStart.toISOString())
+  } else if (dateStart) {
+    // Solo fecha inicio: reservas que salen después de esta fecha
+    query = query.gte('fecha_salida', dateStart.toISOString())
+  } else if (dateEnd) {
+    // Solo fecha fin: reservas que entran antes de esta fecha
     query = query.lte('fecha_entrada', dateEnd.toISOString())
   }
 
   if (search) {
-    query = query.or(`codigo_reserva.ilike.%${search}%,titular_nombre.ilike.%${search}%,titular_numero_doc.ilike.%${search}%`)
+    query = query.or(`codigo_reserva.ilike.%${search}%,titular_nombre.ilike.%${search}%,titular_numero_doc.ilike.%${search}%,habitacion_numero.ilike.%${search}%`)
   }
 
   const { data, count, error } = await query

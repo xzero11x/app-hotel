@@ -4,7 +4,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 export default async function RackPage() {
   return (
-    <div className="fixed inset-0 left-[var(--sidebar-width)] bg-background">
+    <div className="flex flex-1 flex-col h-full overflow-hidden">
       <Suspense fallback={<Skeleton className="h-full w-full" />}>
         <RackContainer />
       </Suspense>

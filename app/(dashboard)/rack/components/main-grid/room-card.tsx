@@ -16,6 +16,10 @@ type Props = {
     onReservationClick: (id: string) => void
     onNewReservation: (habitacion: RackHabitacion, fecha: Date) => void
     onUpdate: () => void
+    // Funciones para actualizaciones optimistas
+    updateHabitacionOptimistic?: (habitacionId: string, updates: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+    revertHabitacionOptimistic?: (habitacionId: string, originalData: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+    updateReservaOptimistic?: (reservaId: string, updates: Partial<Pick<RackReserva, 'huesped_presente'>>) => void
 }
 
 export function RoomCard({
@@ -23,7 +27,10 @@ export function RoomCard({
     reservas,
     onReservationClick,
     onNewReservation,
-    onUpdate
+    onUpdate,
+    updateHabitacionOptimistic,
+    revertHabitacionOptimistic,
+    updateReservaOptimistic,
 }: Props) {
     const visualState = getRoomVisualState(habitacion)
     const now = new Date()
@@ -68,10 +75,13 @@ export function RoomCard({
             habitacion={habitacion}
             reservaActiva={activeReservation ? { id: activeReservation.id, huesped_presente: activeReservation.huesped_presente } : null}
             onUpdate={onUpdate}
+            updateHabitacionOptimistic={updateHabitacionOptimistic}
+            revertHabitacionOptimistic={revertHabitacionOptimistic}
+            updateReservaOptimistic={updateReservaOptimistic}
         >
             <div
                 className={cn(
-                    "relative bg-card border rounded-xl shadow-sm p-4 cursor-pointer transition-all duration-200 group h-full flex flex-col justify-between overflow-hidden",
+                    "relative bg-card border rounded-xl shadow-sm p-3 sm:p-4 cursor-pointer transition-all duration-200 group h-full flex flex-col justify-between overflow-hidden",
                     "hover:shadow-lg hover:border-primary/50 hover:-translate-y-0.5"
                 )}
                 onClick={handleClick}
@@ -90,36 +100,36 @@ export function RoomCard({
                         <Button
                             size="sm"
                             variant="secondary"
-                            className="h-7 w-7 p-0 shadow-md"
+                            className="h-6 w-6 sm:h-7 sm:w-7 p-0 shadow-md"
                             onClick={(e) => {
                                 e.stopPropagation()
                                 onReservationClick(activeReservation.id)
                             }}
                             title="Ver Check-out"
                         >
-                            <LogOut className="h-3.5 w-3.5" />
+                            <LogOut className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                         </Button>
                     )}
                     {upcomingReservation && !activeReservation && (
                         <Button
                             size="sm"
                             variant="secondary"
-                            className="h-7 w-7 p-0 shadow-md"
+                            className="h-6 w-6 sm:h-7 sm:w-7 p-0 shadow-md"
                             onClick={(e) => {
                                 e.stopPropagation()
                                 onReservationClick(upcomingReservation.id)
                             }}
                             title="Ver Check-in"
                         >
-                            <LogIn className="h-3.5 w-3.5" />
+                            <LogIn className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                         </Button>
                     )}
                 </div>
 
-                <div className="flex items-start justify-between mb-3 pl-2">
-                    <div className="space-y-1">
-                        <h3 className="font-bold text-2xl leading-none group-hover:text-primary transition-colors">{habitacion.numero}</h3>
-                        <p className="text-xs text-muted-foreground font-medium">{habitacion.tipos_habitacion.nombre}</p>
+                <div className="flex items-start justify-between mb-2 sm:mb-3 pl-2">
+                    <div className="space-y-0.5 sm:space-y-1">
+                        <h3 className="font-bold text-xl sm:text-2xl leading-none group-hover:text-primary transition-colors">{habitacion.numero}</h3>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">{habitacion.tipos_habitacion.nombre}</p>
                     </div>
 
                     {/* Badges con mejor diseño */}
@@ -180,10 +190,10 @@ export function RoomCard({
                     )}
                 </div>
 
-                <div className="text-xs space-y-2.5 pl-2 mt-auto">
+                <div className="text-[10px] sm:text-xs space-y-2 sm:space-y-2.5 pl-2 mt-auto">
                     <div className="flex justify-between items-center text-muted-foreground">
                         <span className="font-medium">Piso {habitacion.piso}</span>
-                        <div className="flex items-center gap-1 bg-secondary/60 px-2 py-1 rounded-md">
+                        <div className="flex items-center gap-1 bg-secondary/60 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md">
                             <Users className="w-3 h-3" />
                             <span className="font-medium">{habitacion.tipos_habitacion.capacidad_personas || 2}</span>
                         </div>

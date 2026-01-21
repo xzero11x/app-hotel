@@ -110,7 +110,19 @@ export function DetalleTurnoClient({ turnoId, turnoInicial }: Props) {
   // Combinar Yape y Plin para visualización
   const totalBilleteras = porMetodo.totalYape + porMetodo.totalPlin
 
-  const cantidadVentas = turno.movimientos.filter(m => m.tipo === 'INGRESO').length
+  // Analítica de Movimientos
+  const movimientosIngresos = turno.movimientos.filter(m => m.tipo === 'INGRESO')
+  const movimientosEgresos = turno.movimientos.filter(m => m.tipo === 'EGRESO')
+
+  // Calcular devoluciones (egresos con categoría DEVOLUCION o motivo que contenga "Devolución")
+  const movimientosDevoluciones = movimientosEgresos.filter(m =>
+    m.categoria === 'DEVOLUCION' ||
+    (m.motivo && m.motivo.toLowerCase().includes('devolución'))
+  )
+  const cantidadDevoluciones = movimientosDevoluciones.length
+  const montoDevoluciones = movimientosDevoluciones.reduce((acc, m) => acc + (m.monto || 0), 0)
+
+  const cantidadVentas = movimientosIngresos.length
   const ticketPromedio = cantidadVentas > 0 ? stats.total_ingresos_pen / cantidadVentas : 0
 
   return (
@@ -139,93 +151,126 @@ export function DetalleTurnoClient({ turnoId, turnoInicial }: Props) {
         </div>
       )}
 
-      {/* KPIs Fila 1 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Saldo Inicial */}
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-start justify-between">
-              <p className="text-sm text-muted-foreground">Saldo Inicial</p>
-              <Flag className="h-4 w-4 text-muted-foreground" />
+      {/* CÁLCULO DE BALANCE TOTAL */}
+      {(() => {
+        const balanceTotal = t.monto_apertura_efectivo + stats.total_ingresos_pen - stats.total_egresos_pen
+
+        return (
+          <>
+            {/* KPIs Fila 1 - Resumen Financiero Global */}
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Resumen Financiero Global</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              {/* Saldo Inicial */}
+              <Card>
+                <CardContent className="pt-4">
+                  <div className="flex items-start justify-between">
+                    <p className="text-sm text-muted-foreground">Saldo Inicial</p>
+                    <Flag className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <p className="text-2xl font-bold mt-2">
+                    S/ {t.monto_apertura_efectivo.toFixed(2)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Total Ingresos */}
+              <Card className="border-green-100">
+                <CardContent className="pt-4">
+                  <div className="flex items-start justify-between">
+                    <p className="text-sm text-green-600 font-medium">Total Ingresos</p>
+                    <TrendingUp className="h-4 w-4 text-green-600" />
+                  </div>
+                  <p className="text-2xl font-bold text-green-600 mt-2">
+                    S/ {stats.total_ingresos_pen.toFixed(2)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Total Egresos */}
+              <Card className="border-red-100">
+                <CardContent className="pt-4">
+                  <div className="flex items-start justify-between">
+                    <p className="text-sm text-red-600 font-medium">Total Egresos</p>
+                    <TrendingDown className="h-4 w-4 text-red-600" />
+                  </div>
+                  <p className="text-2xl font-bold text-red-600 mt-2">
+                    S/ {stats.total_egresos_pen.toFixed(2)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Balance Total (Todo) */}
+              <Card className="border-purple-200 bg-purple-50/50">
+                <CardContent className="pt-4">
+                  <div className="flex items-start justify-between">
+                    <p className="text-sm text-purple-700 font-medium">Balance Total (Global)</p>
+                    <DollarSign className="h-4 w-4 text-purple-700" />
+                  </div>
+                  <p className="text-2xl font-bold text-purple-700 mt-2">
+                    S/ {balanceTotal.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-purple-600/80 mt-1">
+                    Efectivo + Bancos
+                  </p>
+                </CardContent>
+              </Card>
             </div>
-            <p className="text-2xl font-bold mt-2">
-              S/ {t.monto_apertura_efectivo.toFixed(2)}
-            </p>
-          </CardContent>
-        </Card>
 
-        {/* Total Ingresos */}
-        <Card className="border-green-200">
-          <CardContent className="pt-4">
-            <div className="flex items-start justify-between">
-              <p className="text-sm text-green-600 font-medium">Total Ingresos</p>
-              <TrendingUp className="h-4 w-4 text-green-600" />
+            {/* KPIs Fila 2 - Control de Efectivo */}
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Control de Efectivo (Caja Física)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {/* Efectivo Teórico (Sistema) */}
+              <Card className="border-blue-200 bg-blue-50/50">
+                <CardContent className="pt-4">
+                  <div className="flex items-start justify-between">
+                    <p className="text-sm text-blue-700 font-medium">Efectivo Teórico (Sistema)</p>
+                    <Wallet className="h-4 w-4 text-blue-700" />
+                  </div>
+                  <p className="text-2xl font-bold text-blue-700 mt-2">
+                    S/ {(t.monto_cierre_teorico_efectivo || stats.total_esperado_pen).toFixed(2)}
+                  </p>
+                  <p className="text-xs text-blue-600/80 mt-1">
+                    Debe haber en cajón
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Solo si cerrada: Efectivo Declarado y Diferencia */}
+              {esCerrada && (
+                <>
+                  {/* Efectivo Declarado */}
+                  <Card className="border-pink-200 bg-pink-50/50">
+                    <CardContent className="pt-4">
+                      <div className="flex items-start justify-between">
+                        <p className="text-sm text-pink-700 font-medium">Efectivo Declarado (Real)</p>
+                        <Calculator className="h-4 w-4 text-pink-700" />
+                      </div>
+                      <p className="text-2xl font-bold text-pink-700 mt-2">
+                        S/ {(t.monto_cierre_real_efectivo || 0).toFixed(2)}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Diferencia */}
+                  <Card className={`${Math.abs(diferencia) < 0.5 ? 'border-green-200 bg-green-50/50' : 'border-red-200 bg-red-50/50'}`}>
+                    <CardContent className="pt-4">
+                      <div className="flex items-start justify-between">
+                        <p className={`text-sm font-medium ${Math.abs(diferencia) < 0.5 ? 'text-green-700' : 'text-red-700'}`}>
+                          Diferencia
+                        </p>
+                        <CheckCircle className={`h-4 w-4 ${Math.abs(diferencia) < 0.5 ? 'text-green-600' : 'text-red-600'}`} />
+                      </div>
+                      <p className={`text-2xl font-bold mt-2 ${Math.abs(diferencia) < 0.5 ? 'text-green-700' : 'text-red-700'}`}>
+                        S/ {diferencia.toFixed(2)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
             </div>
-            <p className="text-2xl font-bold text-green-600 mt-2">
-              S/ {stats.total_ingresos_pen.toFixed(2)}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Total Egresos */}
-        <Card className="border-red-200">
-          <CardContent className="pt-4">
-            <div className="flex items-start justify-between">
-              <p className="text-sm text-red-600 font-medium">Total Egresos</p>
-              <TrendingDown className="h-4 w-4 text-red-600" />
-            </div>
-            <p className="text-2xl font-bold text-red-600 mt-2">
-              S/ {stats.total_egresos_pen.toFixed(2)}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Saldo en Caja (Teórico) */}
-        <Card className="border-blue-200 bg-blue-50/50">
-          <CardContent className="pt-4">
-            <div className="flex items-start justify-between">
-              <p className="text-sm text-blue-600 font-medium">Saldo en Caja (Teórico)</p>
-              <Wallet className="h-4 w-4 text-blue-600" />
-            </div>
-            <p className="text-2xl font-bold text-blue-600 mt-2">
-              S/ {(t.monto_cierre_teorico_efectivo || stats.total_esperado_pen).toFixed(2)}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* KPIs Fila 2 - Solo cajas cerradas */}
-      {esCerrada && (
-        <div className="grid grid-cols-2 gap-4">
-          {/* Monto Real Contado */}
-          <Card className="border-pink-200 bg-pink-50/50">
-            <CardContent className="pt-4">
-              <div className="flex items-start justify-between">
-                <p className="text-sm text-pink-600 font-medium">Monto Real Contado</p>
-                <Calculator className="h-4 w-4 text-pink-600" />
-              </div>
-              <p className="text-2xl font-bold text-pink-600 mt-2">
-                S/ {(t.monto_cierre_real_efectivo || 0).toFixed(2)}
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Diferencia */}
-          <Card className={`${Math.abs(diferencia) < 0.5 ? 'border-green-200 bg-green-50/50' : 'border-red-200 bg-red-50/50'}`}>
-            <CardContent className="pt-4">
-              <div className="flex items-start justify-between">
-                <p className={`text-sm font-medium ${Math.abs(diferencia) < 0.5 ? 'text-green-600' : 'text-red-600'}`}>
-                  Diferencia
-                </p>
-                <CheckCircle className={`h-4 w-4 ${Math.abs(diferencia) < 0.5 ? 'text-green-600' : 'text-red-600'}`} />
-              </div>
-              <p className={`text-2xl font-bold mt-2 ${Math.abs(diferencia) < 0.5 ? 'text-green-600' : 'text-red-600'}`}>
-                S/ {diferencia.toFixed(2)}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+          </>
+        )
+      })()}
 
       {/* Cards inferiores */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -238,8 +283,8 @@ export function DetalleTurnoClient({ turnoId, turnoInicial }: Props) {
             <MetodoPagoItem
               icon={<Banknote className="h-4 w-4" />}
               nombre="Efectivo"
-              descripcion="Lo que debe haber en el cajón"
-              monto={porMetodo.totalEfectivoPEN}
+              descripcion={`Incluye apertura S/ ${t.monto_apertura_efectivo.toFixed(2)}`}
+              monto={porMetodo.totalEfectivoPEN + t.monto_apertura_efectivo} // Ajustamos visualización para incluir apertura como en sidebar
             />
             <Separator />
             <MetodoPagoItem
@@ -297,7 +342,7 @@ export function DetalleTurnoClient({ turnoId, turnoInicial }: Props) {
               <div className="flex-1">
                 <p className="text-sm text-muted-foreground">Cantidad de Devoluciones</p>
                 <p className="font-semibold">
-                  0 <span className="text-muted-foreground font-normal">(S/ 0.00)</span>
+                  {cantidadDevoluciones} <span className="text-muted-foreground font-normal">(S/ {montoDevoluciones.toFixed(2)})</span>
                 </p>
               </div>
             </div>

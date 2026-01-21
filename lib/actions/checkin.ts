@@ -107,6 +107,7 @@ const checkInSchema = z.object({
         tipo_documento: z.string(),
         numero_documento: z.string(),
         nacionalidad: z.string().optional(),
+        es_titular: z.boolean().optional().default(false)
     })).optional(),
 })
 
@@ -115,119 +116,73 @@ export async function crearCheckIn(data: any) {
         const validated = checkInSchema.parse(data)
         const supabase = await createClient()
 
-        // Verificar que la habitación esté disponible
-        const { data: habitacion, error: habitacionError } = await supabase
-            .from('habitaciones')
-            .select('estado_ocupacion, estado_servicio')
-            .eq('id', validated.habitacion_id)
+        // 1. Obtener datos completos del huésped principal (Titular)
+        // El formulario solo envía el ID, pero el RPC necesita los datos para el upsert atómico
+        const { data: titular, error: titularError } = await supabase
+            .from('huespedes')
+            .select('*')
+            .eq('id', validated.huesped_principal_id)
             .single()
 
-        if (habitacionError || !habitacion) {
-            return { error: 'Habitación no encontrada' }
+        if (titularError || !titular) {
+            return { error: 'No se encontró la información del huésped principal' }
         }
 
-        if (habitacion.estado_ocupacion !== 'LIBRE') {
-            return { error: 'La habitación no está disponible' }
-        }
-
-        if (habitacion.estado_servicio !== 'OPERATIVA') {
-            return { error: 'La habitación está fuera de servicio' }
-        }
-
-        // Generar código de reserva
-        const codigo_reserva = `RSV-${Date.now().toString().slice(-8)}`
-
-        // Crear la reserva con estado CHECKED_IN directamente
-        const { data: reserva, error: reservaError } = await supabase
-            .from('reservas')
-            .insert({
-                codigo_reserva: codigo_reserva,
-                habitacion_id: validated.habitacion_id,
-                canal_venta_id: validated.canal_venta_id,
-                fecha_entrada: validated.fecha_entrada,
-                fecha_salida: validated.fecha_salida,
-                precio_pactado: validated.precio_pactado,
-                moneda_pactada: validated.moneda_pactada,
-                estado: 'CHECKED_IN',
-                check_in_real: new Date().toISOString(),
-                huesped_presente: true,
-            })
-            .select()
-            .single()
-
-        if (reservaError) {
-            console.error('Error al crear reserva:', reservaError)
-            return { error: 'Error al crear la reserva con check-in' }
-        }
-
-        // Asociar huésped principal
-        await supabase
-            .from('reserva_huespedes')
-            .insert({
-                reserva_id: reserva.id,
-                huesped_id: validated.huesped_principal_id,
-                es_titular: true,
-            })
-
-        // Asociar acompañantes si hay
-        if (validated.acompanantes && validated.acompanantes.length > 0) {
-            for (const acomp of validated.acompanantes) {
-                // Crear o buscar acompañante
-                const { data: acompHuesped } = await supabase
-                    .from('huespedes')
-                    .select('id')
-                    .eq('numero_documento', acomp.numero_documento)
-                    .eq('tipo_documento', acomp.tipo_documento)
-                    .single()
-
-                let acompId = acompHuesped?.id
-
-                if (!acompId) {
-                    const { data: newAcomp } = await supabase
-                        .from('huespedes')
-                        .insert({
-                            nombres: acomp.nombres,
-                            apellidos: acomp.apellidos,
-                            tipo_documento: acomp.tipo_documento,
-                            numero_documento: acomp.numero_documento,
-                            nacionalidad: acomp.nacionalidad || 'PE',
-                        })
-                        .select('id')
-                        .single()
-
-                    acompId = newAcomp?.id
-                }
-
-                if (acompId) {
-                    await supabase
-                        .from('reserva_huespedes')
-                        .insert({
-                            reserva_id: reserva.id,
-                            huesped_id: acompId,
-                            es_titular: false,
-                        })
-                }
+        // 2. Construir lista unificada de huéspedes para el RPC
+        const listaHuespedes = [
+            {
+                ...titular,
+                es_titular: true
             }
+        ]
+
+        if (validated.acompanantes && validated.acompanantes.length > 0) {
+            validated.acompanantes.forEach(acomp => {
+                listaHuespedes.push({
+                    ...acomp,
+                    es_titular: false,
+                    // Campos opcionales que el RPC acepta
+                    correo: null,
+                    telefono: null,
+                    direccion: null,
+                    razon_social: null
+                })
+            })
         }
 
-        // Actualizar estado de la habitación a OCUPADA + LIMPIA
-        // NOTA: Se marca LIMPIA porque el huésped acaba de entrar
-        // Se marcará SUCIA después del check-out
-        await supabase
-            .from('habitaciones')
-            .update({ 
-                estado_ocupacion: 'OCUPADA',
-                estado_limpieza: 'LIMPIA'
-            })
-            .eq('id', validated.habitacion_id)
+        // 3. Llamada Atómica al RPC (Todo o Nada)
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('realizar_checkin_atomico', {
+            p_habitacion_id: validated.habitacion_id,
+            p_fecha_entrada: validated.fecha_entrada,
+            p_fecha_salida: validated.fecha_salida,
+            p_precio_pactado: validated.precio_pactado,
+            p_moneda_pactada: validated.moneda_pactada,
+            p_huespedes: listaHuespedes,
+            p_reserva_id: null, // NULL indica nueva reserva (Walk-in)
+            p_canal_venta_id: validated.canal_venta_id || null
+        })
 
-        return { reserva }
+        if (rpcError) {
+            console.error('Error RPC crearCheckIn:', rpcError)
+            return { error: `Error del sistema: ${rpcError.message}` }
+        }
+
+        // Validar respuesta lógica del RPC
+        // El RPC devuelve JSONB: { success: boolean, error?: string, reserva_id?: string }
+        const result = rpcResult as any
+
+        if (!result.success) {
+            return { error: result.error || 'Error al procesar el check-in' }
+        }
+
+        return { reserva: { id: result.reserva_id } }
+
     } catch (error) {
         console.error('Error en crearCheckIn:', error)
         if (error instanceof z.ZodError) {
             return { error: error.issues[0].message }
         }
-        return { error: 'Error al crear check-in' }
+        return { error: 'Error inesperado al crear check-in' }
     }
 }
 
@@ -302,119 +257,48 @@ export async function getHabitacionesDisponibles() {
 // ========================================
 // REALIZAR CHECK-IN (Cambio de estado RESERVADA → CHECKED_IN)
 // ========================================
-// NOTA: Esta función implementa lógica EXPLÍCITA sin depender de triggers
-// según documento de requerimientos (sección 6.3.1)
 export async function realizarCheckin(reserva_id: string) {
     const supabase = await createClient()
 
     try {
-        // 1️⃣ OBTENER DATOS DE LA RESERVA
-        const { data: reserva, error: reservaError } = await supabase
-            .from('reservas')
-            .select('id, habitacion_id, estado')
-            .eq('id', reserva_id)
-            .single()
+        // Llamada a la función atómica en base de datos
+        // Esta función maneja el bloqueo de fila (FOR UPDATE) y la transición ACID
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('confirmar_checkin_reserva', {
+            p_reserva_id: reserva_id
+        })
 
-        if (reservaError || !reserva) {
-            return { 
-                error: 'Reserva no encontrada',
-                code: 'RESERVA_NO_ENCONTRADA' 
-            }
-        }
-
-        // Validar que esté en estado RESERVADA
-        if (reserva.estado !== 'RESERVADA') {
+        if (rpcError) {
+            console.error('Error RPC confirmar_checkin_reserva:', rpcError)
             return {
-                error: 'Estado inválido',
-                message: `No se puede hacer check-in. La reserva está en estado: ${reserva.estado}`,
-                code: 'ESTADO_INVALIDO'
+                error: 'Error de sistema',
+                message: `Error interno al procesar check-in: ${rpcError.message}`,
+                code: 'ERROR_RPC'
             }
         }
 
-        // 2️⃣ VALIDAR HABITACIÓN
-        const { data: habitacion, error: habError } = await supabase
-            .from('habitaciones')
-            .select('estado_limpieza, estado_servicio, estado_ocupacion')
-            .eq('id', reserva.habitacion_id)
-            .single()
+        // Casting del resultado JSONB
+        const result = rpcResult as any
 
-        if (habError || !habitacion) {
-            return { 
-                error: 'Habitación no encontrada',
-                code: 'HABITACION_NO_ENCONTRADA' 
-            }
-        }
-
-        // Validar estado de servicio
-        if (habitacion.estado_servicio !== 'OPERATIVA') {
+        if (!result.success) {
+            // El RPC devuelve el mensaje de error específico (ej: "Habitación sucia")
             return {
-                error: 'Habitación no operativa',
-                message: `La habitación está en ${habitacion.estado_servicio}. Por favor, contacte a mantenimiento.`,
-                code: 'HABITACION_NO_OPERATIVA'
+                error: 'No se puede realizar el check-in',
+                message: result.error,
+                code: 'VALIDACION_FALLIDA'
             }
         }
 
-        // Validar estado de limpieza
-        if (habitacion.estado_limpieza !== 'LIMPIA') {
-            return {
-                error: 'Habitación requiere limpieza',
-                message: 'Por favor, solicite al área de housekeeping que limpie la habitación primero.',
-                code: 'HABITACION_SUCIA'
-            }
+        return {
+            success: true,
+            message: result.message || 'Check-in realizado exitosamente'
         }
 
-        // Validar que no esté ocupada (doble check)
-        if (habitacion.estado_ocupacion === 'OCUPADA') {
-            return {
-                error: 'Habitación ocupada',
-                message: 'La habitación ya está ocupada por otra reserva.',
-                code: 'HABITACION_OCUPADA'
-            }
-        }
-
-        // 3️⃣ ACTUALIZAR RESERVA (EXPLÍCITO)
-        const { error: updateReservaError } = await supabase
-            .from('reservas')
-            .update({ 
-                estado: 'CHECKED_IN',
-                check_in_real: new Date().toISOString(),
-                huesped_presente: true
-            })
-            .eq('id', reserva_id)
-
-        if (updateReservaError) {
-            throw new Error(`Error al actualizar reserva: ${updateReservaError.message}`)
-        }
-
-        // 4️⃣ ACTUALIZAR HABITACIÓN (EXPLÍCITO)
-        const { error: updateHabitacionError } = await supabase
-            .from('habitaciones')
-            .update({ 
-                estado_ocupacion: 'OCUPADA',
-                estado_limpieza: 'LIMPIA' // Mantiene limpia al entrar
-            })
-            .eq('id', reserva.habitacion_id)
-
-        if (updateHabitacionError) {
-            // Rollback: revertir estado de reserva
-            await supabase
-                .from('reservas')
-                .update({ estado: 'RESERVADA', check_in_real: null, huesped_presente: false })
-                .eq('id', reserva_id)
-            
-            throw new Error(`Error al actualizar habitación: ${updateHabitacionError.message}`)
-        }
-
-        return { 
-            success: true, 
-            message: 'Check-in realizado exitosamente' 
-        }
     } catch (error: any) {
-        console.error('[realizarCheckin] Error:', error)
+        console.error('[realizarCheckin] Error inesperado:', error)
         return {
             error: 'Error de sistema',
-            message: 'Hubo un problema al procesar el check-in. Por favor, intente nuevamente.',
-            code: 'ERROR_SISTEMA'
+            message: 'Hubo un problema inesperado al procesar el check-in.',
+            code: 'ERROR_EXCEPTION'
         }
     }
 }

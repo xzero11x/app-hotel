@@ -24,6 +24,7 @@ import { Loader2, Receipt, CreditCard, Banknote, ArrowRightLeft } from 'lucide-r
 import { toast } from 'sonner'
 import { cobrarYFacturar } from '@/lib/actions/pagos'
 import { getSeriesDisponibles } from '@/lib/actions/comprobantes'
+import { differenceInCalendarDays } from 'date-fns'
 
 type Props = {
   open: boolean
@@ -36,6 +37,8 @@ type Props = {
     titular_numero_doc: string
     habitacion_numero: string
     precio_pactado: number
+    fecha_entrada: string
+    fecha_salida: string
   }
   onSuccess: () => void
 }
@@ -43,18 +46,18 @@ type Props = {
 export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: Props) {
   const [loading, setLoading] = useState(false)
   const [series, setSeries] = useState<any[]>([])
-  
+
   // Estado del Formulario
   const [monto, setMonto] = useState(reserva.saldo_pendiente.toString())
   const [montoRecibido, setMontoRecibido] = useState('')
   const [metodoPago, setMetodoPago] = useState('EFECTIVO')
   const [numeroOperacion, setNumeroOperacion] = useState('')
   const [nota, setNota] = useState('')
-  
+
   // Facturación
   const [tipoComprobante, setTipoComprobante] = useState<'BOLETA' | 'FACTURA'>('BOLETA')
   const [serieId, setSerieId] = useState('')
-  
+
   // Datos Cliente
   const [clienteDoc, setClienteDoc] = useState(reserva.titular_numero_doc)
   const [clienteNombre, setClienteNombre] = useState(reserva.titular_nombre)
@@ -118,7 +121,7 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
       toast.error('El monto a cobrar debe ser mayor a 0')
       return
     }
-    
+
     if (metodoPago === 'EFECTIVO' && recibidoNum < montoNum) {
       toast.error(`Faltan S/ ${falta.toFixed(2)} para cubrir el monto`)
       return
@@ -142,7 +145,33 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
 
     try {
       setLoading(true)
-      
+
+      // Cálculo de noches y desglose profesional
+      const noches = Math.max(1, differenceInCalendarDays(
+        new Date(reserva.fecha_salida.split('T')[0] + 'T12:00:00'),
+        new Date(reserva.fecha_entrada.split('T')[0] + 'T12:00:00')
+      ))
+
+      const totalEstadiaReal = noches * reserva.precio_pactado
+      const esPagoTotal = Math.abs(montoNum - totalEstadiaReal) < 0.01
+
+      // Definir item del comprobante
+      const itemComprobante = esPagoTotal
+        ? {
+          descripcion: `Servicio de Hospedaje - Habitación ${reserva.habitacion_numero} (${noches} noches)`,
+          cantidad: noches,
+          precio_unitario: reserva.precio_pactado,
+          subtotal: montoNum,
+          codigo_afectacion_igv: '10'
+        }
+        : {
+          descripcion: `Regularización Alojamiento - Habitación ${reserva.habitacion_numero}`,
+          cantidad: 1,
+          precio_unitario: montoNum,
+          subtotal: montoNum,
+          codigo_afectacion_igv: '10'
+        }
+
       const result = await cobrarYFacturar({
         reserva_id: reserva.id,
         metodo_pago: metodoPago as any,
@@ -150,23 +179,15 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
         moneda: 'PEN', // MVP: Todo en Soles
         referencia_pago: numeroOperacion,
         nota: nota,
-        
+
         tipo_comprobante: tipoComprobante,
         serie: serieId,
-        cliente_tipo_doc: tipoComprobante === 'FACTURA' ? 'RUC' : 'DNI', 
+        cliente_tipo_doc: tipoComprobante === 'FACTURA' ? 'RUC' : 'DNI',
         cliente_numero_doc: clienteDoc,
         cliente_nombre: clienteNombre,
         cliente_direccion: clienteDireccion,
-        
-        items: [
-          {
-            descripcion: `Servicio de Hospedaje - Habitación ${reserva.habitacion_numero}`,
-            cantidad: 1,
-            precio_unitario: montoNum,
-            subtotal: montoNum,
-            codigo_afectacion_igv: '10' // Gravado
-          }
-        ]
+
+        items: [itemComprobante]
       })
 
       if (result.success) {
@@ -203,12 +224,12 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
               <Label className="text-xs text-muted-foreground uppercase tracking-wider">Monto a Cobrar</Label>
               <div className="flex items-baseline gap-1 mt-1">
                 <span className="text-sm font-medium text-muted-foreground">S/</span>
-                <Input 
-                  type="number" 
-                  step="0.01" 
+                <Input
+                  type="number"
+                  step="0.01"
                   className="text-2xl font-bold h-10 border-0 bg-transparent p-0 focus-visible:ring-0 w-full"
-                  value={monto} 
-                  onChange={(e) => setMonto(e.target.value)} 
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
                 />
               </div>
             </div>
@@ -236,7 +257,7 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
                   <Label htmlFor="recibido" className="text-xs text-blue-600">Dinero Recibido</Label>
                   <div className="relative mt-1">
                     <Banknote className="absolute left-2.5 top-2.5 h-4 w-4 text-blue-400" />
-                    <Input 
+                    <Input
                       id="recibido"
                       type="number"
                       placeholder="0.00"
@@ -246,7 +267,7 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
                     />
                   </div>
                 </div>
-                
+
                 <div className="flex justify-between items-center border-t pt-2 border-blue-200">
                   <span className="text-sm font-medium text-blue-700">Vuelto:</span>
                   <span className={`text-lg font-bold ${vuelto > 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
@@ -262,9 +283,9 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
                 <Label htmlFor="ref">Nro. Operación / Ref</Label>
                 <div className="relative">
                   <ArrowRightLeft className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input 
+                  <Input
                     id="ref"
-                    placeholder="Últimos 4 dígitos" 
+                    placeholder="Últimos 4 dígitos"
                     className="pl-9"
                     value={numeroOperacion}
                     onChange={(e) => setNumeroOperacion(e.target.value)}
@@ -280,7 +301,7 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
               <Label>Comprobante</Label>
               <div className="flex items-center gap-2">
                 <div className="grid grid-cols-2 gap-2 flex-1">
-                  <Button 
+                  <Button
                     type="button"
                     variant={tipoComprobante === 'BOLETA' ? 'default' : 'outline'}
                     size="sm"
@@ -288,7 +309,7 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
                   >
                     Boleta
                   </Button>
-                  <Button 
+                  <Button
                     type="button"
                     variant={tipoComprobante === 'FACTURA' ? 'default' : 'outline'}
                     size="sm"
@@ -311,8 +332,8 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
 
             <div className="space-y-2">
               <Label>{tipoComprobante === 'FACTURA' ? 'RUC *' : 'DNI / Documento'}</Label>
-              <Input 
-                value={clienteDoc} 
+              <Input
+                value={clienteDoc}
                 onChange={(e) => setClienteDoc(e.target.value)}
                 placeholder={tipoComprobante === 'FACTURA' ? '20...' : 'Documento'}
                 maxLength={tipoComprobante === 'FACTURA' ? 11 : 20}
@@ -321,8 +342,8 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
 
             <div className="space-y-2">
               <Label>{tipoComprobante === 'FACTURA' ? 'Razón Social *' : 'Nombre Cliente'}</Label>
-              <Input 
-                value={clienteNombre} 
+              <Input
+                value={clienteNombre}
                 onChange={(e) => setClienteNombre(e.target.value)}
                 placeholder="Nombre o Razón Social"
               />
@@ -330,8 +351,8 @@ export function RegistrarPagoDialog({ open, onOpenChange, reserva, onSuccess }: 
 
             <div className="space-y-2">
               <Label>Dirección (Opcional)</Label>
-              <Input 
-                value={clienteDireccion} 
+              <Input
+                value={clienteDireccion}
                 onChange={(e) => setClienteDireccion(e.target.value)}
                 placeholder="Dirección fiscal"
               />

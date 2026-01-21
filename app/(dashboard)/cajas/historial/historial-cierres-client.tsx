@@ -95,7 +95,10 @@ export function HistorialCierresClient() {
               <span className="text-sm">Filtros:</span>
             </div>
 
-            <Select defaultValue="todos">
+            <Select
+              value={filtros.usuario_id || 'todos'}
+              onValueChange={(value) => setFiltros((prev) => ({ ...prev, usuario_id: value === 'todos' ? '' : value }))}
+            >
               <SelectTrigger className="w-[200px] h-9 text-sm border-gray-200 bg-gray-50/50 focus:bg-white transition-colors">
                 <SelectValue placeholder="Todos los usuarios" />
               </SelectTrigger>

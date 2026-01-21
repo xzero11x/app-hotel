@@ -15,6 +15,11 @@ type Props = {
   onNewReservation: (habitacion: RackHabitacion, fecha: Date, fechaFinal?: Date) => void
   onUpdate: () => void
   clearSelection?: boolean
+  // Funciones para actualizaciones optimistas
+  updateHabitacionOptimistic?: (habitacionId: string, updates: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+  revertHabitacionOptimistic?: (habitacionId: string, originalData: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+  updateReservaOptimistic?: (reservaId: string, updates: Partial<Pick<RackReserva, 'huesped_presente'>>) => void
+  removeReservaOptimistic?: (reservaId: string) => void
 }
 
 export function RackGrid({
@@ -25,7 +30,11 @@ export function RackGrid({
   onReservationClick,
   onNewReservation,
   onUpdate,
-  clearSelection
+  clearSelection,
+  updateHabitacionOptimistic,
+  revertHabitacionOptimistic,
+  updateReservaOptimistic,
+  removeReservaOptimistic,
 }: Props) {
   // Generar días desde startDate hasta endDate
   const days = eachDayOfInterval({ start: startDate, end: endDate })
@@ -37,7 +46,6 @@ export function RackGrid({
 
   return (
     <div className="relative h-full">
-      {/* Grid Container */}
       <div className="overflow-auto h-full no-scrollbar">
         <div
           className="grid"
@@ -46,10 +54,7 @@ export function RackGrid({
             minWidth: 'max-content'
           }}
         >
-          {/* Header Row */}
           <GridHeader days={days} />
-
-          {/* Room Rows */}
           {habitaciones.map((habitacion) => (
             <RoomRow
               key={habitacion.id}
@@ -61,6 +66,10 @@ export function RackGrid({
               onNewReservation={onNewReservation}
               onUpdate={onUpdate}
               clearSelection={clearSelection}
+              updateHabitacionOptimistic={updateHabitacionOptimistic}
+              revertHabitacionOptimistic={revertHabitacionOptimistic}
+              updateReservaOptimistic={updateReservaOptimistic}
+              removeReservaOptimistic={removeReservaOptimistic}
             />
           ))}
         </div>

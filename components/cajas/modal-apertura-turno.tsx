@@ -31,6 +31,8 @@ type Props = {
   onSuccess: () => void | Promise<void>
   onCancel?: () => void
   allowCancel?: boolean
+  // Callback para modo observador (admin que entra sin turno)
+  onModoObservador?: () => void
   // Datos pre-cargados del TurnoProvider (optimización)
   cajasIniciales?: Caja[]
   loadingCajasInicial?: boolean
@@ -50,6 +52,7 @@ export function ModalAperturaTurno({
   onSuccess,
   onCancel,
   allowCancel = true,
+  onModoObservador,
   cajasIniciales,
   loadingCajasInicial = false,
   userIdInicial
@@ -393,24 +396,40 @@ export function ModalAperturaTurno({
             </div>
 
             {/* Botones */}
-            <div className="flex gap-3">
-              {allowCancel && (
+            <div className="space-y-3">
+              <div className="flex gap-3">
+                {allowCancel && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCancel}
+                    disabled={loading}
+                    className="flex-1"
+                    size="lg"
+                  >
+                    Cancelar
+                  </Button>
+                )}
+                <Button type="submit" disabled={loading} className="flex-1" size="lg">
+                  {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  <Lock className="h-4 w-4 mr-2" />
+                  Abrir Turno
+                </Button>
+              </div>
+
+              {/* Opción para entrar sin turno (modo observador) */}
+              {onModoObservador && (
                 <Button
                   type="button"
-                  variant="outline"
-                  onClick={handleCancel}
+                  variant="ghost"
+                  onClick={onModoObservador}
                   disabled={loading}
-                  className="flex-1"
-                  size="lg"
+                  className="w-full text-muted-foreground"
+                  size="sm"
                 >
-                  Cancelar
+                  Entrar sin turno (solo lectura)
                 </Button>
               )}
-              <Button type="submit" disabled={loading} className="flex-1" size="lg">
-                {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                <Lock className="h-4 w-4 mr-2" />
-                Abrir Turno
-              </Button>
             </div>
           </form>
         )}

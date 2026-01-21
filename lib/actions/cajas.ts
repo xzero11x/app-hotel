@@ -427,7 +427,7 @@ export async function deleteCaja(id: string): Promise<Result<void>> {
 
 /**
  * Obtener cajas disponibles (activas sin turno abierto)
- * Optimizado: Una sola query con LEFT JOIN en lugar de N+1 queries
+ * Optimizad: Una sola query con LEFT JOIN en lugar de N+1 queries
  */
 export async function getCajasDisponibles(): Promise<Result<Caja[]>> {
   try {
@@ -668,7 +668,7 @@ export async function getTurnoActivo(userId?: string): Promise<DetalleTurno | nu
 
   // OPTIMIZACIÓN: Ejecutar movimientos y estadísticas EN PARALELO
   // Antes: secuencial (~400ms) → Ahora: paralelo (~200ms)
-  const [movimientosResult, statsResult] = await Promise.all([
+  const [movimientosResult, statsResult, pagosResult] = await Promise.all([
     // Query de movimientos
     supabase
       .from('caja_movimientos')
@@ -689,11 +689,18 @@ export async function getTurnoActivo(userId?: string): Promise<DetalleTurno | nu
     // RPC de estadísticas
     supabase.rpc('calcular_movimientos_turno', {
       p_turno_id: turno.id
-    })
+    }),
+
+    // Query de pagos (para desglose de métodos)
+    supabase
+      .from('pagos')
+      .select('metodo_pago, monto, moneda_pago, tipo_cambio_pago')
+      .eq('caja_turno_id', turno.id)
   ])
 
   const { data: movimientos, error: movError } = movimientosResult
   const { data: stats } = statsResult
+  const { data: pagos } = pagosResult
 
   if (movError) {
     console.error('Error al obtener movimientos:', movError)
@@ -707,12 +714,17 @@ export async function getTurnoActivo(userId?: string): Promise<DetalleTurno | nu
     total_egresos_usd: 0,
   }
 
+  // --- LÓGICA DE DESGLOSE DE MÉTODOS DE PAGO Y RECONCILIACIÓN ---
+  // Usar helper centralizado para consistencia obsesiva
+  const { desglose } = calcularReconciliacionCaja(pagos || [], estadisticas)
+  // -------------------------------------------------------------
+
   const flujo_neto_pen = estadisticas.total_ingresos_pen - estadisticas.total_egresos_pen
   const flujo_neto_usd = estadisticas.total_ingresos_usd - estadisticas.total_egresos_usd
   const total_esperado_pen = turno.monto_apertura_efectivo + flujo_neto_pen
   const total_esperado_usd = turno.monto_apertura_usd + flujo_neto_usd
 
-  // Acceder a las relaciones con type assertion para evitar errores de tipos
+  // Acceder a las relaciones
   const cajaData = turno.cajas as any
   const usuarioData = turno.usuarios as any
 
@@ -751,6 +763,7 @@ export async function getTurnoActivo(userId?: string): Promise<DetalleTurno | nu
     })),
     estadisticas: {
       ...estadisticas,
+      desglose_metodos_pago: desglose, // Agregado el desglose
       flujo_neto_pen,
       flujo_neto_usd,
       total_esperado_pen,
@@ -858,30 +871,42 @@ export async function getDetalleTurnoCerrado(turnoId: string): Promise<DetalleTu
     throw new Error('Turno no encontrado')
   }
 
-  const { data: movimientos, error: movError } = await supabase
-    .from('caja_movimientos')
-    .select(`
-      id,
-      tipo,
-      categoria,
-      moneda,
-      monto,
-      motivo,
-      comprobante_referencia,
-      created_at,
-      usuarios!caja_movimientos_usuario_id_fkey(nombres, apellidos)
-    `)
-    .eq('caja_turno_id', turno.id)
-    .order('created_at', { ascending: false })
+  // Ejecutar consultas en paralelo para optimización
+  const [movimientosResult, statsResult, pagosResult] = await Promise.all([
+    supabase
+      .from('caja_movimientos')
+      .select(`
+        id,
+        tipo,
+        categoria,
+        moneda,
+        monto,
+        motivo,
+        comprobante_referencia,
+        created_at,
+        usuarios!caja_movimientos_usuario_id_fkey(nombres, apellidos)
+      `)
+      .eq('caja_turno_id', turno.id)
+      .order('created_at', { ascending: false }),
+
+    supabase.rpc('calcular_movimientos_turno', {
+      p_turno_id: turno.id
+    }),
+
+    supabase
+      .from('pagos')
+      .select('metodo_pago, monto, moneda_pago, tipo_cambio_pago')
+      .eq('caja_turno_id', turno.id)
+  ])
+
+  const { data: movimientos, error: movError } = movimientosResult
+  const { data: stats } = statsResult
+  const { data: pagos } = pagosResult
 
   if (movError) {
     console.error('Error al obtener movimientos:', movError)
     throw new Error('Error al obtener movimientos')
   }
-
-  const { data: stats } = await supabase.rpc('calcular_movimientos_turno', {
-    p_turno_id: turno.id
-  })
 
   const estadisticas = stats?.[0] || {
     total_ingresos_pen: 0,
@@ -889,6 +914,9 @@ export async function getDetalleTurnoCerrado(turnoId: string): Promise<DetalleTu
     total_egresos_pen: 0,
     total_egresos_usd: 0,
   }
+
+  // Usar helper centralizado para consistencia obsesiva
+  const { desglose } = calcularReconciliacionCaja(pagos || [], estadisticas)
 
   const flujo_neto_pen = estadisticas.total_ingresos_pen - estadisticas.total_egresos_pen
   const flujo_neto_usd = estadisticas.total_ingresos_usd - estadisticas.total_egresos_usd
@@ -932,6 +960,7 @@ export async function getDetalleTurnoCerrado(turnoId: string): Promise<DetalleTu
     })),
     estadisticas: {
       ...estadisticas,
+      desglose_metodos_pago: desglose, // Agregado desglose reconciliado
       flujo_neto_pen,
       flujo_neto_usd,
       total_esperado_pen: turno.monto_apertura_efectivo + flujo_neto_pen,
@@ -1021,50 +1050,10 @@ export async function getDetalleTurnoActivo(turnoId: string): Promise<DetalleTur
     .select('metodo_pago, monto, moneda_pago, tipo_cambio_pago')
     .eq('caja_turno_id', turno.id)
 
-  const desglose = {
-    efectivo: 0,
-    tarjeta: 0,
-    billetera: 0,
-    transferencia: 0,
-    otros: 0
-  }
+  // Usar helper centralizado para consistencia obsesiva
+  const { desglose } = calcularReconciliacionCaja(pagos || [], estadisticas)
 
-  // Ingresos reportados en pagos
-  if (pagos) {
-    pagos.forEach(p => {
-      // Normalizar todo a PEN para el desglose visual principal
-      const montoEnPen = p.moneda_pago === 'USD' ? p.monto * (p.tipo_cambio_pago || 1) : p.monto
 
-      switch (p.metodo_pago) {
-        case 'EFECTIVO': desglose.efectivo += montoEnPen; break;
-        case 'TARJETA': desglose.tarjeta += montoEnPen; break;
-        case 'YAPE':
-        case 'PLIN': desglose.billetera += montoEnPen; break;
-        case 'TRANSFERENCIA': desglose.transferencia += montoEnPen; break;
-        default: desglose.otros += montoEnPen;
-      }
-    })
-  }
-
-  // Importante: Los "ingresos" en caja_movimientos incluyen los cobros de pagos + otros ingresos manuales.
-  // Pero la tabla pagos solo tiene cobros de reservas. 
-  // Para cuadrar con "Total Ingresos", debemos considerar que:
-  // Total Ingresos = (Pagos Efectivo) + (Pagos Otros Métodos) + (Ingresos Manuales Caja)
-  // Normalmente en arqueo, solo "Efectivo" debe cuadrar con lo físico en cajón.
-  // Los ingresos manuales de caja se asumen EFECTIVO a menos que se especifique lo contrario (no implementado aún campo metodo en movimientos manuales).
-  // Por ahora asumiremos que todo movimiento manual 'INGRESO' en caja es efectivo.
-
-  // Calcular ingresos manuales (no vienen de cobros de reserva)
-  // Un movimiento manual NO tiene 'comprobante_referencia' o tiene motivo manual
-  // Simplificación: Total Ingresos Caja - Total Pagos Registrados = Ingresos Manuales (Efectivo)
-
-  const totalPagosRegistrados = desglose.efectivo + desglose.tarjeta + desglose.billetera + desglose.transferencia + desglose.otros
-  const totalIngresosCaja = estadisticas.total_ingresos_pen // Asumiendo todo en PEN por ahora para simplificar vista
-
-  // Si hay diferencia positiva, es dinero ingresado manualmente (caja chica, aportes, etc) -> Efectivo
-  if (totalIngresosCaja > totalPagosRegistrados) {
-    desglose.efectivo += (totalIngresosCaja - totalPagosRegistrados)
-  }
 
   return {
     turno: {
@@ -1261,6 +1250,47 @@ export async function forzarCierreCaja(input: {
 }
 
 /**
+ * Obtener efectivo disponible en el turno activo
+ * Calcula: apertura + ingresos_efectivo - egresos_efectivo
+ * Útil para validar si hay saldo suficiente antes de una devolución
+ */
+export async function getEfectivoDisponibleTurno(): Promise<{
+  success: boolean
+  efectivo_disponible?: number
+  turno_id?: string
+  error?: string
+}> {
+  try {
+    const turno = await getTurnoActivo()
+
+    if (!turno) {
+      return { success: false, error: 'No hay turno activo' }
+    }
+
+    // Calcular efectivo disponible usando la lógica existente
+    // total_esperado_pen ya tiene: apertura + ingresos - egresos
+    const supabase = await createClient()
+    const efectivoReal = await calcularEfectivoLocal(
+      supabase,
+      turno.turno.id,
+      turno.estadisticas.total_esperado_pen
+    )
+
+    return {
+      success: true,
+      efectivo_disponible: efectivoReal,
+      turno_id: turno.turno.id
+    }
+  } catch (error: any) {
+    console.error('Error al calcular efectivo disponible:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+/**
+ * Registrar movimiento de caja
+ */
+/**
  * Registrar movimiento de caja
  */
 export async function registrarMovimiento(input: {
@@ -1307,7 +1337,146 @@ export async function registrarMovimiento(input: {
     return { success: false, error: 'Error al registrar movimiento' }
   }
 
+  revalidatePath('/')
   revalidatePath('/cajas')
+  revalidatePath(`/cajas/gestionar/${turnoActivo.turno.id}`)
+  return { success: true }
+}
+
+/**
+ * Helper crucial para mantener consistencia "obsesivamente correcta" en toda la app.
+ * Centraliza la lógica de desglose de métodos de pago y reconciliación de efectivo vs movimientos.
+ */
+function calcularReconciliacionCaja(pagos: any[], estadisticas: any) {
+  const desglose = {
+    efectivo: 0,
+    tarjeta: 0,
+    billetera: 0,
+    transferencia: 0,
+    otros: 0
+  }
+
+  let totalPagosPositivos = 0
+  let totalPagosNegativosEfectivo = 0
+  let totalGeneral = 0
+
+  if (pagos) {
+    pagos.forEach(p => {
+      // Normalizar todo a PEN para el desglose visual principal
+      const montoEnPen = p.moneda_pago === 'USD' ? p.monto * (p.tipo_cambio_pago || 1) : p.monto
+      totalGeneral += montoEnPen
+
+      // Acumular para lógica de conciliación
+      if (montoEnPen > 0) {
+        totalPagosPositivos += montoEnPen
+      } else if (p.metodo_pago === 'DEVOLUCION_EFECTIVO') {
+        totalPagosNegativosEfectivo += Math.abs(montoEnPen)
+      }
+
+      switch (p.metodo_pago) {
+        case 'EFECTIVO':
+          desglose.efectivo += montoEnPen;
+          break;
+        case 'DEVOLUCION_EFECTIVO':
+          desglose.efectivo += montoEnPen; // Resta del efectivo (monto es negativo)
+          break;
+        case 'TARJETA': desglose.tarjeta += montoEnPen; break;
+        case 'YAPE':
+        case 'PLIN': desglose.billetera += montoEnPen; break;
+        case 'TRANSFERENCIA': desglose.transferencia += montoEnPen; break;
+        default: desglose.otros += montoEnPen;
+      }
+    })
+  }
+
+  // A. Ingresos Manuales
+  const totalIngresosCaja = estadisticas.total_ingresos_pen
+  let manualIngreso = 0
+  if (totalIngresosCaja > totalPagosPositivos) {
+    manualIngreso = totalIngresosCaja - totalPagosPositivos
+    desglose.efectivo += manualIngreso
+  }
+
+  // B. Egresos Manuales
+  const totalEgresosCaja = estadisticas.total_egresos_pen
+  let manualEgreso = 0
+  if (totalEgresosCaja > totalPagosNegativosEfectivo) {
+    manualEgreso = totalEgresosCaja - totalPagosNegativosEfectivo
+    desglose.efectivo -= manualEgreso
+  }
+
+  return {
+    desglose,
+    totalGeneral,
+    manualIngreso,
+    manualEgreso,
+    totalPagosPositivos,
+    totalPagosNegativosEfectivo
+  }
+}
+
+/**
+ * Obtener devoluciones pendientes de procesar
+ * Son pagos negativos con metodo_pago 'DEVOLUCION_PENDIENTE'
+ */
+export async function getDevolucionesPendientes() {
+  const supabase = await createClient()
+
+  const { data: devoluciones, error } = await supabase
+    .from('pagos')
+    .select(`
+      id,
+      monto,
+      fecha_pago,
+      nota,
+      reserva:reservas(
+        id,
+        codigo_reserva,
+        huesped:huespedes(nombre_completo)
+      )
+    `)
+    .eq('metodo_pago', 'DEVOLUCION_PENDIENTE')
+    .order('fecha_pago', { ascending: false })
+
+  if (error) {
+    console.error('Error al obtener devoluciones pendientes:', error)
+    return []
+  }
+
+  return devoluciones || []
+}
+
+/**
+ * Marcar una devolución pendiente como procesada
+ * Actualiza el método de pago de DEVOLUCION_PENDIENTE al método real usado (ej: YAPE)
+ */
+export async function marcarDevolucionProcesada(pagoId: string, metodoReal: string, notaAdicional?: string) {
+  const supabase = await createClient()
+
+  // Obtener nota actual
+  // Obtener nota actual y turno
+  const { data: pago } = await supabase.from('pagos').select('nota, caja_turno_id').eq('id', pagoId).single()
+  const nuevaNota = `${pago?.nota || ''} - Procesado con ${metodoReal} ${notaAdicional ? `(${notaAdicional})` : ''}`
+
+  const { error } = await supabase
+    .from('pagos')
+    .update({
+      metodo_pago: metodoReal,
+      nota: nuevaNota,
+      fecha_pago: new Date().toISOString() // Actualizamos fecha al momento real del pago
+    })
+    .eq('id', pagoId)
+    .eq('metodo_pago', 'DEVOLUCION_PENDIENTE')
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath('/')
+  revalidatePath('/cajas')
+  if (pago?.caja_turno_id) {
+    revalidatePath(`/cajas/gestionar/${pago.caja_turno_id}`)
+  }
   return { success: true }
 }
 
@@ -1329,59 +1498,41 @@ export async function getReporteMetodosPago(turnoId: string) {
     return { success: false, error: 'Error al calcular reporte de pagos' }
   }
 
-  // 2. Inicializar contadores
+  // 2. Obtener estadísticas base para el helper (movimientos físicos)
+  const { data: stats } = await supabase.rpc('calcular_movimientos_turno', { p_turno_id: turnoId })
+  const estadisticas = stats?.[0] || {
+    total_ingresos_pen: 0,
+    total_egresos_pen: 0,
+    total_ingresos_usd: 0,
+    total_egresos_usd: 0
+  }
+
+  // 3. Usar helper centralizado para conciliación "Obsesivamente Correcta"
+  const {
+    desglose,
+    totalGeneral,
+    manualIngreso,
+    manualEgreso,
+    totalPagosPositivos,
+    totalPagosNegativosEfectivo
+  } = calcularReconciliacionCaja(pagos || [], estadisticas)
+
   const totales = {
-    totalEfectivoPEN: 0,
-    totalTarjeta: 0,
-    totalYape: 0,
-    totalPlin: 0,
-    totalTransferencia: 0,
-    totalGeneral: 0,
-    pagos: pagos || []
-  }
+    totalEfectivoPEN: desglose.efectivo,
+    totalTarjeta: desglose.tarjeta,
+    totalYape: desglose.billetera, // Mapeo de nombre para compatibilidad UI (Total Yape = Billetera)
+    totalPlin: 0, // Incluido en billetera por ahora
+    totalTransferencia: desglose.transferencia,
+    totalGeneral,
+    pagos: pagos || [],
 
-  // 3. Obtener "Otros Ingresos" directos a caja (que NO son cobros de reserva)
-  // Ej: Aportes de caja chica, ingresos manuales. Se asumen efectivo.
-  // Cálculo: Total Ingresos Caja (movimientos) - Total Pagos (cobros reserva)
-
-  // Primero necesitamos el total de ingresos registrados en movimientos de caja
-  const { data: movimientos } = await supabase
-    .from('caja_movimientos')
-    .select('monto, moneda, tipo')
-    .eq('caja_turno_id', turnoId)
-    .eq('tipo', 'INGRESO')
-
-  let totalIngresosCajaPEN = 0
-  if (movimientos) {
-    movimientos.forEach(m => {
-      // Asumiendo cambio 1.0 si no hay info mejor, o usar moneda. 
-      // Simplificación: si es USD convertir a PEN (TODO: usar tasa del día o movimiento)
-      // Por ahora asumimos movimientos son consistentes o todo PEN.
-      totalIngresosCajaPEN += m.monto
-    })
-  }
-
-  // 4. Sumar pagos
-  pagos.forEach(p => {
-    // Normalizar a PEN
-    const monto = p.moneda_pago === 'USD' ? p.monto * (p.tipo_cambio_pago || 1) : p.monto
-    totales.totalGeneral += monto
-
-    switch (p.metodo_pago) {
-      case 'EFECTIVO': totales.totalEfectivoPEN += monto; break;
-      case 'TARJETA': totales.totalTarjeta += monto; break;
-      case 'YAPE': totales.totalYape += monto; break;
-      case 'PLIN': totales.totalPlin += monto; break;
-      case 'TRANSFERENCIA': totales.totalTransferencia += monto; break;
-    }
-  })
-
-  // 5. Ajustar Efectivo con la diferencia (Ingresos Manuales)
-  // Si en la caja hay MÁS ingresos que los reportados por pagos de reserva, 
-  // la diferencia se asume ingreso en Efectivo (ej: ingreso manual sin reserva).
-  if (totalIngresosCajaPEN > totales.totalGeneral) {
-    const diferencia = totalIngresosCajaPEN - totales.totalGeneral
-    totales.totalEfectivoPEN += diferencia
+    // Metadata adicional útil para debugging/auditoría
+    manualIngreso,
+    manualEgreso,
+    totalIngresosMovimientos: estadisticas.total_ingresos_pen,
+    totalEgresosMovimientos: estadisticas.total_egresos_pen,
+    totalPagosPositivos,
+    totalPagosNegativosEfectivo
   }
 
   return { success: true, data: totales }

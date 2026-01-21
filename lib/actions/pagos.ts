@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getHotelConfig } from '@/lib/actions/configuracion'
+import { enviarComprobanteNubefact } from '@/lib/services/nubefact'
 import { calcularTotalReserva } from '@/lib/utils'
 import { logger } from '@/lib/logger'
 import { getErrorMessage } from '@/lib/errors'
@@ -102,27 +103,42 @@ export async function cobrarYFacturar(input: CobrarYFacturarInput) {
       .from('series_comprobante')
       .select('id, tipo_comprobante')
       .eq('serie', input.serie)
+      .eq('tipo_comprobante', input.tipo_comprobante)
       .single()
 
     if (serieError || !serieValida) {
-      throw new Error(`La serie ${input.serie} no existe. Configure las series en Configuración > Cajas`)
-    }
-
-    if (serieValida.tipo_comprobante !== input.tipo_comprobante) {
-      throw new Error(
-        `La serie ${input.serie} es de tipo ${serieValida.tipo_comprobante}, no se puede usar para ${input.tipo_comprobante}`
-      )
+      if (serieError && serieError.code !== 'PGRST116') {
+        console.error('Error DB buscando serie:', serieError)
+      }
+      throw new Error(`La serie ${input.serie} no existe para el tipo ${input.tipo_comprobante}. Verifique Configuración > Cajas`)
     }
 
     // 4. Obtener Correlativo (Atómico)
     const { data: correlativo, error: corrError } = await supabase
-      .rpc('obtener_siguiente_correlativo', { p_serie: input.serie })
+      .rpc('obtener_siguiente_correlativo', {
+        p_serie: input.serie,
+        p_tipo: input.tipo_comprobante
+      })
 
-    if (corrError || !correlativo) throw new Error('Error al generar número de comprobante')
+    if (corrError || !correlativo) {
+      console.error('Error RPC obtener_siguiente_correlativo:', corrError)
+      throw new Error(`Error al generar correlativo: ${corrError?.message || 'Error desconocido'}`)
+    }
 
     // 5. Calcular Totales Fiscales
     // Obtener configuración dinámica del hotel
     const config = await getHotelConfig()
+
+    // Validar que la facturación electrónica esté activa
+    if (!config.facturacion_activa) {
+      throw new Error('La facturación electrónica no está activada. Active esta opción en Configuración > General.')
+    }
+
+    // Validar RUC configurado
+    if (!config.ruc || config.ruc === '20000000001') {
+      throw new Error('Debe configurar un RUC válido en Configuración antes de emitir comprobantes.')
+    }
+
     const TASA_IGV = (config.tasa_igv || 18.00) / 100
     const ES_EXONERADO = config.es_exonerado_igv
 
@@ -252,6 +268,110 @@ export async function cobrarYFacturar(input: CobrarYFacturarInput) {
         originalError: getErrorMessage(movError),
       })
       throw new Error(`Error crítico: El pago se registró pero NO se pudo guardar en caja. Detalle: ${movError.message}`)
+    }
+
+    // 10. ENVIAR A NUBEFACT (Facturación Electrónica)
+    // Esto se hace DESPUÉS de guardar todo localmente para no perder datos si Nubefact falla
+    try {
+      // Formatear fecha a DD-MM-YYYY (formato requerido por Nubefact)
+      const hoy = new Date()
+      const fechaFormateada = `${String(hoy.getDate()).padStart(2, '0')}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${hoy.getFullYear()}`
+
+      const respuestaNubefact = await enviarComprobanteNubefact({
+        tipo_comprobante: input.tipo_comprobante,
+        serie: input.serie,
+        numero: correlativo,
+
+        cliente_tipo_documento: input.cliente_tipo_doc,
+        cliente_numero_documento: input.cliente_numero_doc,
+        cliente_denominacion: input.cliente_nombre,
+        cliente_direccion: input.cliente_direccion,
+
+        fecha_emision: fechaFormateada,
+        moneda: input.moneda,
+        tipo_cambio: input.tipo_cambio || 1.0,
+        porcentaje_igv: config.tasa_igv || 18,
+        total_gravada: op_gravadas,
+        total_exonerada: op_exoneradas,
+        total_igv: monto_igv,
+        total: total_venta,
+
+        items: input.items.map(item => {
+          const esExonerado = ES_EXONERADO || item.codigo_afectacion_igv === '20'
+          const tasaIgv = esExonerado ? 0 : TASA_IGV
+          // valor_unitario = precio sin IGV
+          const valorUnitario = item.precio_unitario / (1 + tasaIgv)
+          // subtotal = valor_unitario * cantidad (sin IGV)
+          const subtotalItem = valorUnitario * item.cantidad
+          // igv de la línea
+          const igvLinea = subtotalItem * tasaIgv
+          // total de la línea
+          const totalLinea = subtotalItem + igvLinea
+
+          return {
+            unidad_de_medida: 'ZZ', // ZZ = Servicio
+            codigo: '90101501', // Código SUNAT para servicios de alojamiento
+            descripcion: item.descripcion,
+            cantidad: item.cantidad,
+            valor_unitario: Number(valorUnitario.toFixed(10)),
+            precio_unitario: Number(item.precio_unitario.toFixed(2)),
+            subtotal: Number(subtotalItem.toFixed(2)),
+            tipo_de_igv: esExonerado ? 8 : 1, // 1=Gravado, 8=Exonerado
+            igv: Number(igvLinea.toFixed(2)),
+            total: Number(totalLinea.toFixed(2))
+          }
+        })
+      })
+
+      if (respuestaNubefact.success) {
+        // ÉXITO: Tenemos respuesta válida de Nubefact (PDF generado)
+        // Puede estar ACEPTADO o PENDIENTE (en proceso/demo)
+        const estadoFinal = respuestaNubefact.aceptada_por_sunat ? 'ACEPTADO' : 'PENDIENTE'
+
+        // Actualizar comprobante con datos de Nubefact
+        await supabase
+          .from('comprobantes')
+          .update({
+            estado_sunat: estadoFinal,
+            hash_cpe: respuestaNubefact.hash,
+            xml_url: respuestaNubefact.enlace,
+            cdr_url: respuestaNubefact.enlace_del_cdr,
+            pdf_url: respuestaNubefact.enlace_pdf, // Guardamos PDF para prevenir "null"
+            external_id: respuestaNubefact.enlace_pdf, // Usar external_id como backup del link
+            observaciones: respuestaNubefact.mensaje // Guardamos "Enviado a SUNAT (En Proceso)" o similar
+          })
+          .eq('id', comprobante.id)
+
+        logger.info(`Comprobante procesado exitosamente (${estadoFinal})`, {
+          action: 'cobrarYFacturar',
+          comprobanteId: comprobante.id,
+          hash: respuestaNubefact.hash
+        })
+      } else {
+        // FALLO: Nubefact o SUNAT rechazaron explícitamente
+        // Marcar como rechazado
+        await supabase
+          .from('comprobantes')
+          .update({
+            estado_sunat: 'RECHAZADO',
+            observaciones: respuestaNubefact.errors || respuestaNubefact.mensaje
+          })
+          .eq('id', comprobante.id)
+
+        logger.warn('Comprobante rechazado por SUNAT/Nubefact', {
+          action: 'cobrarYFacturar',
+          comprobanteId: comprobante.id,
+          error: respuestaNubefact.errors
+        })
+      }
+    } catch (nubefactError) {
+      // Si falla Nubefact, el comprobante queda PENDIENTE (no bloqueamos el pago)
+      logger.error('Error al enviar a Nubefact (comprobante queda PENDIENTE)', {
+        action: 'cobrarYFacturar',
+        comprobanteId: comprobante.id,
+        error: getErrorMessage(nubefactError)
+      })
+      // NO lanzamos error - el pago y comprobante local ya se guardaron
     }
 
     revalidatePath('/rack')

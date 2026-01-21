@@ -14,6 +14,7 @@ import {
   Wallet,
   History,
   UserCircle,
+  Sparkles,
 } from 'lucide-react'
 
 import { NavMain } from '@/components/nav-main'
@@ -37,14 +38,20 @@ import { WidgetTurnoSidebar } from '@/components/cajas/widget-turno-sidebar'
 // Datos de navegación
 const navItems = [
   {
-    title: 'Inicio',
+    title: 'Dashboard Ejecutivo',
     url: '/',
     icon: LayoutDashboard,
+    adminOnly: true, // Solo para ADMIN
   },
   {
     title: 'Rack',
     url: '/rack',
     icon: Bed,
+  },
+  {
+    title: 'Limpieza',
+    url: '/limpieza',
+    icon: Sparkles,
   },
 
   {
@@ -76,6 +83,17 @@ const navItems = [
     title: 'Gestión de Cajas',
     url: '/cajas',
     icon: Wallet,
+    items: [
+      {
+        title: 'Cajas y Turnos',
+        url: '/cajas',
+      },
+      {
+        title: 'Retiros Administrativos',
+        url: '/cajas/retiros-administrativos',
+        adminOnly: true,
+      },
+    ],
   },
   {
     title: 'Configuración',
@@ -125,20 +143,26 @@ export function AppSidebar({
 
   // Filtrar items según rol
   const filteredNavItems = React.useMemo(() => {
-    // Si es ADMIN, mostrar todo
-    if (user?.rol === 'ADMIN') {
-      return navItems
-    }
+    const isAdmin = user?.rol === 'ADMIN'
 
-    // Si NO es admin, filtrar items sensibles (Configuración)
-    return navItems.filter(item => {
-      // Ocultar completamente el grupo Configuración
-      if (item.title === 'Configuración') return false
-
-      // Aquí se podrían agregar más reglas (ej: ocultar Gestión de Cajas para Housekeeping)
-
-      return true
-    })
+    return navItems
+      .filter(item => {
+        // Ocultar items de nivel superior que son adminOnly
+        if ((item as any).adminOnly && !isAdmin) return false
+        // Ocultar completamente el grupo Configuración si no es admin
+        if (item.title === 'Configuración' && !isAdmin) return false
+        return true
+      })
+      .map(item => {
+        // Si tiene subitems, filtrar los que son adminOnly
+        if (item.items && !isAdmin) {
+          return {
+            ...item,
+            items: item.items.filter((subitem: any) => !subitem.adminOnly)
+          }
+        }
+        return item
+      })
   }, [user?.rol])
 
   return (

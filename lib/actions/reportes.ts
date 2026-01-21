@@ -117,3 +117,130 @@ export async function getLibroHuespedes(filtros: FiltrosLibro) {
 
     return { success: true, data: filas }
 }
+
+// ========================================
+// REPORTE DE RETIROS ADMINISTRATIVOS
+// ========================================
+
+export interface RetiroAdministrativo {
+    id: string
+    fecha: string
+    monto: number
+    moneda: 'PEN' | 'USD'
+    motivo: string
+    receptor: string  // Extraído del motivo
+    cajero: string    // Quien registró el egreso
+    turno_id: string
+    caja_nombre: string
+}
+
+export interface ResumenRetiros {
+    total_pen: number
+    total_usd: number
+    cantidad: number
+    retiros: RetiroAdministrativo[]
+}
+
+export type FiltrosRetiros = {
+    fechaInicio: Date
+    fechaFin: Date
+}
+
+/**
+ * Obtiene el reporte de retiros administrativos (dueño/gerencia)
+ * para un periodo determinado, consolidando totales y detalles.
+ */
+export async function getReporteRetirosAdministrativos(filtros: FiltrosRetiros): Promise<{ success: boolean; data?: ResumenRetiros; error?: string }> {
+    const supabase = await createClient()
+
+    const fechaInicioISO = filtros.fechaInicio.toISOString()
+    const fechaFinISO = filtros.fechaFin.toISOString()
+
+    // Obtener movimientos tipo EGRESO con categoría RETIRO_ADMINISTRATIVO
+    // o que contengan "RETIRO ADMINISTRATIVO" en el motivo
+    const { data: movimientos, error } = await supabase
+        .from('caja_movimientos')
+        .select(`
+            id,
+            monto,
+            moneda,
+            motivo,
+            created_at,
+            categoria,
+            caja_turno_id,
+            usuarios!caja_movimientos_usuario_id_fkey (
+                nombres,
+                apellidos
+            ),
+            caja_turnos!caja_turno_id (
+                id,
+                cajas (
+                    nombre
+                )
+            )
+        `)
+        .eq('tipo', 'EGRESO')
+        .gte('created_at', fechaInicioISO)
+        .lte('created_at', fechaFinISO)
+        .or('categoria.eq.RETIRO_ADMINISTRATIVO,motivo.ilike.%RETIRO ADMINISTRATIVO%')
+        .order('created_at', { ascending: false })
+
+    if (error) {
+        console.error('Error al obtener retiros:', error)
+        return { success: false, error: 'Error al obtener retiros administrativos' }
+    }
+
+    // Procesar y transformar datos
+    let totalPen = 0
+    let totalUsd = 0
+    const retiros: RetiroAdministrativo[] = []
+
+    for (const mov of movimientos || []) {
+        const monto = Number(mov.monto)
+        const moneda = mov.moneda as 'PEN' | 'USD'
+
+        if (moneda === 'PEN') {
+            totalPen += monto
+        } else {
+            totalUsd += monto
+        }
+
+        // Extraer receptor del motivo (formato: "RETIRO ADMINISTRATIVO - Entregado a: [NOMBRE]. [resto]")
+        let receptor = 'No especificado'
+        const matchReceptor = mov.motivo.match(/Entregado a:\s*([^.]+)/i)
+        if (matchReceptor) {
+            receptor = matchReceptor[1].trim()
+        }
+
+        // Datos del cajero
+        const usuario = mov.usuarios as any
+        const cajero = usuario ? `${usuario.nombres} ${usuario.apellidos}`.trim() : 'Desconocido'
+
+        // Datos del turno/caja
+        const turno = mov.caja_turnos as any
+        const cajaNombre = turno?.cajas?.nombre || 'Sin caja'
+
+        retiros.push({
+            id: mov.id,
+            fecha: mov.created_at,
+            monto,
+            moneda,
+            motivo: mov.motivo,
+            receptor,
+            cajero,
+            turno_id: mov.caja_turno_id,
+            caja_nombre: cajaNombre
+        })
+    }
+
+    return {
+        success: true,
+        data: {
+            total_pen: totalPen,
+            total_usd: totalUsd,
+            cantidad: retiros.length,
+            retiros
+        }
+    }
+}
+

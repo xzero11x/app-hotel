@@ -123,20 +123,20 @@ export function RegistroLegalClient() {
     ]
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
             {/* Header y Controles Unificados */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 print:hidden border-b pb-6">
+            <div className="flex flex-col gap-4 sm:gap-6 print:hidden border-b pb-4 sm:pb-6">
                 <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Libro de Huéspedes</h2>
-                    <p className="text-sm text-muted-foreground mt-1">
+                    <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Libro de Huéspedes</h2>
+                    <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                         Reporte legal para notaría (Hojas Sueltas)
                     </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                     <div className="flex items-center gap-2 bg-muted/40 p-1 rounded-md border">
                         <Select value={mes} onValueChange={setMes}>
-                            <SelectTrigger className="h-9 w-[140px] border-0 bg-transparent focus:ring-0 shadow-none">
+                            <SelectTrigger className="h-9 w-full sm:w-[140px] border-0 bg-transparent focus:ring-0 shadow-none text-xs sm:text-sm">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -149,7 +149,7 @@ export function RegistroLegalClient() {
                         <div className="w-px h-5 bg-border mx-1" />
 
                         <Select value={anio} onValueChange={setAnio}>
-                            <SelectTrigger className="h-9 w-[90px] border-0 bg-transparent focus:ring-0 shadow-none">
+                            <SelectTrigger className="h-9 w-full sm:w-[90px] border-0 bg-transparent focus:ring-0 shadow-none text-xs sm:text-sm">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -160,12 +160,12 @@ export function RegistroLegalClient() {
                         </Select>
                     </div>
 
-                    <Button onClick={generarReporte} disabled={loading} className="h-10 px-6 shadow-sm">
+                    <Button onClick={generarReporte} disabled={loading} className="h-10 px-4 sm:px-6 shadow-sm text-xs sm:text-sm">
                         {loading ? 'Generando...' : 'Generar Reporte'}
                     </Button>
 
                     {datos.length > 0 && (
-                        <div className="flex items-center gap-2 border-l pl-4 ml-2">
+                        <div className="flex items-center gap-2 sm:border-l sm:pl-4 sm:ml-2">
                             <Button variant="outline" size="icon" onClick={handleExportExcel} className="h-10 w-10 text-green-700 hover:text-green-800 hover:bg-green-50 border-green-200" title="Exportar Excel">
                                 <FileSpreadsheet className="h-4 w-4" />
                             </Button>
@@ -179,73 +179,73 @@ export function RegistroLegalClient() {
 
             {/* Vista Previa / Impresión */}
             {searched && (
-                <div className="print:block min-h-[500px]">
+                <div className="print:block min-h-[400px] sm:min-h-[500px]">
                     {/* Cabecera del Documento Legal */}
-                    <div className="hidden print:block mb-8 text-center">
-                        <h1 className="text-xl font-bold uppercase tracking-widest border-b-2 border-black pb-2 inline-block">
+                    <div className="hidden print:block mb-6 sm:mb-8 text-center">
+                        <h1 className="text-lg sm:text-xl font-bold uppercase tracking-widest border-b-2 border-black pb-2 inline-block">
                             Registro de Huéspedes
                         </h1>
-                        <p className="text-sm mt-2">
+                        <p className="text-xs sm:text-sm mt-2">
                             Periodo: {meses[parseInt(mes)].label.toUpperCase()} {anio}
                         </p>
                     </div>
 
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm border-collapse">
+                    <div className="overflow-x-auto -mx-3 sm:mx-0">
+                        <table className="w-full text-[10px] sm:text-sm border-collapse min-w-[800px]">
                             <thead>
                                 <tr className="bg-muted print:bg-transparent">
-                                    <th className="border border-black p-2 text-center w-12 font-semibold">Hab</th>
-                                    <th className="border border-black p-2 text-center w-20 font-semibold">Fecha</th>
-                                    <th className="border border-black p-2 text-center w-16 font-semibold">Hora</th>
-                                    <th className="border border-black p-2 text-center w-20 font-semibold">Salida</th>
-                                    <th className="border border-black p-2 text-right w-16 font-semibold">Tarifa</th>
-                                    <th className="border border-black p-2 text-right w-20 font-semibold">Total</th>
-                                    <th className="border border-black p-2 text-left font-semibold">Huésped</th>
-                                    <th className="border border-black p-2 text-center w-16 font-semibold">Tipo</th>
-                                    <th className="border border-black p-2 text-center w-24 font-semibold">N° Doc</th>
-                                    <th className="border border-black p-2 text-center w-24 font-semibold">Nacionalidad</th>
-                                    <th className="border border-black p-2 text-center w-24 font-semibold">Procedencia</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-10 sm:w-12 font-semibold">Hab</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-16 sm:w-20 font-semibold">Fecha</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-12 sm:w-16 font-semibold">Hora</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-16 sm:w-20 font-semibold">Salida</th>
+                                    <th className="border border-black p-1 sm:p-2 text-right w-14 sm:w-16 font-semibold">Tarifa</th>
+                                    <th className="border border-black p-1 sm:p-2 text-right w-16 sm:w-20 font-semibold">Total</th>
+                                    <th className="border border-black p-1 sm:p-2 text-left font-semibold">Huésped</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-14 sm:w-16 font-semibold">Tipo</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-20 sm:w-24 font-semibold">N° Doc</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-20 sm:w-24 font-semibold">Nacionalidad</th>
+                                    <th className="border border-black p-1 sm:p-2 text-center w-20 sm:w-24 font-semibold">Procedencia</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {datos.length === 0 ? (
                                     <tr>
-                                        <td colSpan={11} className="border border-black p-8 text-center text-muted-foreground italic">
+                                        <td colSpan={11} className="border border-black p-6 sm:p-8 text-center text-muted-foreground italic text-xs sm:text-sm">
                                             No hay registros de ingreso en este periodo.
                                         </td>
                                     </tr>
                                 ) : (
                                     datos.map((fila, i) => (
                                         <tr key={i} className="print:break-inside-avoid">
-                                            <td className="border border-black p-1.5 text-center font-bold">{fila.habitacion}</td>
-                                            <td className="border border-black p-1.5 text-center">
+                                            <td className="border border-black p-1 sm:p-1.5 text-center font-bold">{fila.habitacion}</td>
+                                            <td className="border border-black p-1 sm:p-1.5 text-center">
                                                 {format(new Date(fila.fecha_ingreso), 'dd/MM/yy')}
                                             </td>
-                                            <td className="border border-black p-1.5 text-center">
+                                            <td className="border border-black p-1 sm:p-1.5 text-center">
                                                 {format(new Date(fila.fecha_ingreso), 'HH:mm')}
                                             </td>
-                                            <td className="border border-black p-1.5 text-center">
+                                            <td className="border border-black p-1 sm:p-1.5 text-center">
                                                 {format(new Date(fila.fecha_salida), 'dd/MM/yy')}
                                             </td>
-                                            <td className="border border-black p-1.5 text-right">
+                                            <td className="border border-black p-1 sm:p-1.5 text-right">
                                                 S/{fila.tarifa_numero.toFixed(2)}
                                             </td>
-                                            <td className="border border-black p-1.5 text-right font-medium">
+                                            <td className="border border-black p-1 sm:p-1.5 text-right font-medium">
                                                 S/{fila.total.toFixed(2)}
                                             </td>
-                                            <td className="border border-black p-1.5 font-medium truncate max-w-[200px]">
+                                            <td className="border border-black p-1 sm:p-1.5 font-medium truncate max-w-[150px] sm:max-w-[200px]">
                                                 {fila.nombre_completo}
                                             </td>
-                                            <td className="border border-black p-1.5 text-center">
+                                            <td className="border border-black p-1 sm:p-1.5 text-center text-[10px] sm:text-xs">
                                                 {fila.tipo_documento}
                                             </td>
-                                            <td className="border border-black p-1.5 text-center">
+                                            <td className="border border-black p-1 sm:p-1.5 text-center text-[10px] sm:text-xs">
                                                 {fila.numero_documento}
                                             </td>
-                                            <td className="border border-black p-1.5 text-center text-xs">
+                                            <td className="border border-black p-1 sm:p-1.5 text-center text-[9px] sm:text-xs">
                                                 {fila.nacionalidad}
                                             </td>
-                                            <td className="border border-black p-1.5 text-center text-xs">
+                                            <td className="border border-black p-1 sm:p-1.5 text-center text-[9px] sm:text-xs">
                                                 {fila.departamento}
                                             </td>
                                         </tr>
@@ -255,7 +255,7 @@ export function RegistroLegalClient() {
                         </table>
                     </div>
 
-                    <div className="mt-8 hidden print:block text-xs text-center text-gray-500">
+                    <div className="mt-6 sm:mt-8 hidden print:block text-xs text-center text-gray-500">
                         <p>Página legalizada N° _______</p>
                     </div>
                 </div>

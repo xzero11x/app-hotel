@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { format, differenceInDays } from 'date-fns'
+import { format, differenceInDays, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   Sheet,
@@ -62,6 +62,8 @@ type PaymentData = {
   titular_numero_doc: string
   habitacion_numero: string
   precio_pactado: number
+  fecha_entrada?: string
+  fecha_salida?: string
 }
 
 type SuccessData = {
@@ -82,12 +84,12 @@ export function NewReservationDialog({
   const [paymentData, setPaymentData] = useState<PaymentData | null>(null)
   const [successData, setSuccessData] = useState<SuccessData | null>(null)
   
-  // Calcular fecha_salida: si hay fechaFinal, usar día siguiente; sino +1 día desde fechaInicial
+  // Calcular fecha_salida: 
+  // Si hay fechaFinal (rango seleccionado), es la última noche. Sumamos 1 día para el checkout.
+  // Si solo hay fechaInicial, sumamos 1 día para que sea una estadía de 1 noche.
   const calcularFechaSalida = () => {
-    if (fechaFinal) {
-      return new Date(fechaFinal.getTime() + 86400000) // fechaFinal + 1 día
-    }
-    return new Date(fechaInicial.getTime() + 86400000) // fechaInicial + 1 día
+    const base = fechaFinal || fechaInicial
+    return addDays(base, 1)
   }
   
   const [formData, setFormData] = useState<FormData>({
@@ -136,7 +138,9 @@ export function NewReservationDialog({
       titular_tipo_doc: titular.tipo_documento,
       titular_numero_doc: titular.numero_documento,
       habitacion_numero: habitacion.numero,
-      precio_pactado: formData.precio_pactado
+      precio_pactado: formData.precio_pactado,
+      fecha_entrada: formData.fecha_entrada.toISOString(),
+      fecha_salida: formData.fecha_salida.toISOString()
     })
     
     // NO cerramos el sheet aquí para que el diálogo de pago pueda renderizarse encima

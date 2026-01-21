@@ -15,10 +15,10 @@ export default async function ConfiguracionPage() {
         ]}
       />
 
-      <div className="flex flex-1 flex-col gap-4 p-4">
+      <div className="flex flex-1 flex-col gap-3 sm:gap-4 p-3 sm:p-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Configuración</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Configuración</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">
             Configura los datos generales del hotel y horarios
           </p>
         </div>

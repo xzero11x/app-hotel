@@ -5,7 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { getMovimientosByTurno, getResumenMovimientos } from '@/lib/actions/movimientos'
+import { getResumenMovimientos } from '@/lib/actions/movimientos'
+import { getReporteMetodosPago } from '@/lib/actions/cajas'
 import { CerrarCajaDialog } from '@/components/cajas/cerrar-caja-dialog'
 import { ModalMovimiento } from './modal-movimiento'
 import { DollarSign, Clock, Lock, TrendingUp, TrendingDown, Plus, Minus } from 'lucide-react'
@@ -33,19 +34,19 @@ type Props = {
 export function WidgetCajaActiva({ turno, onTurnoCerrado }: Props) {
   const [modalIngresoOpen, setModalIngresoOpen] = useState(false)
   const [modalEgresoOpen, setModalEgresoOpen] = useState(false)
-  const [movimientos, setMovimientos] = useState<any>(null)
+  const [reportePagos, setReportePagos] = useState<any>(null)
   const [resumenMovimientos, setResumenMovimientos] = useState<any>(null)
   const [loadingMovimientos, setLoadingMovimientos] = useState(false)
 
   const cargarMovimientos = async () => {
     setLoadingMovimientos(true)
-    const [resultMovimientos, resultResumen] = await Promise.all([
-      getMovimientosByTurno(turno.id),
+    const [resultPagos, resultResumen] = await Promise.all([
+      getReporteMetodosPago(turno.id),
       getResumenMovimientos(turno.id)
     ])
 
-    if (resultMovimientos.success) {
-      setMovimientos(resultMovimientos.data)
+    if (resultPagos.success) {
+      setReportePagos(resultPagos.data)
     }
     if (resultResumen.success) {
       setResumenMovimientos(resultResumen.data)
@@ -120,35 +121,41 @@ export function WidgetCajaActiva({ turno, onTurnoCerrado }: Props) {
               <div className="text-center text-muted-foreground py-2">
                 Calculando...
               </div>
-            ) : movimientos && (
+            ) : reportePagos && (
               <>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <TrendingUp className="h-3 w-3" />
-                    Efectivo PEN:
-                  </span>
-                  <span className="font-semibold text-green-700 dark:text-green-400">
-                    S/ {movimientos.totalEfectivoPEN.toFixed(2)}
+                  <div className="flex flex-col">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <TrendingUp className="h-3 w-3" />
+                      Efectivo en Caja:
+                    </span>
+                    <span className="text-[10px] text-muted-foreground ml-4">
+                      (Teórico)
+                    </span>
+                  </div>
+                  {/* Saldo Efectivo Teórico = Apertura + Neto Efectivo (Pagos + Movimientos - Egresos) */}
+                  <span className="font-semibold text-green-700 dark:text-green-400 text-lg">
+                    S/ {(turno.monto_apertura_efectivo + reportePagos.totalEfectivoPEN).toFixed(2)}
                   </span>
                 </div>
 
-                {movimientos.totalEfectivoUSD > 0 && (
+                {reportePagos.totalEfectivoUSD > 0 && (
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Efectivo USD:</span>
                     <span className="font-semibold text-green-700 dark:text-green-400">
-                      $ {movimientos.totalEfectivoUSD.toFixed(2)}
+                      $ {(turno.monto_apertura_usd || 0 + reportePagos.totalEfectivoUSD).toFixed(2)}
                     </span>
                   </div>
                 )}
 
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">Tarjeta:</span>
-                  <span>S/ {movimientos.totalTarjeta.toFixed(2)}</span>
+                  <span>S/ {reportePagos.totalTarjeta.toFixed(2)}</span>
                 </div>
 
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">Yape:</span>
-                  <span>S/ {movimientos.totalYape.toFixed(2)}</span>
+                  <span>S/ {reportePagos.totalYape.toFixed(2)}</span>
                 </div>
 
                 <Separator />
@@ -156,12 +163,8 @@ export function WidgetCajaActiva({ turno, onTurnoCerrado }: Props) {
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Total General:</span>
                   <span className="font-bold text-base">
-                    S/ {movimientos.totalGeneral.toFixed(2)}
+                    S/ {reportePagos.totalGeneral.toFixed(2)}
                   </span>
-                </div>
-
-                <div className="text-xs text-muted-foreground text-center pt-1">
-                  {movimientos.pagos.length} transacción(es)
                 </div>
               </>
             )}
@@ -231,14 +234,14 @@ export function WidgetCajaActiva({ turno, onTurnoCerrado }: Props) {
             {/* Diálogo de Cierre Unificado */}
             <CerrarCajaDialog
               turnoId={turno.id}
-              totalEsperadoPen={movimientos?.totalEfectivoPEN || 0}
-              totalEsperadoUsd={movimientos?.totalEfectivoUSD || 0}
+              totalEsperadoPen={reportePagos?.totalEfectivoPEN || 0}
+              totalEsperadoUsd={reportePagos?.totalEfectivoUSD || 0}
               customTrigger={
                 <Button
                   variant="destructive"
                   size="sm"
                   className="w-full"
-                  disabled={!movimientos}
+                  disabled={!reportePagos}
                 >
                   <Lock className="h-3 w-3 mr-2" />
                   Cerrar Turno

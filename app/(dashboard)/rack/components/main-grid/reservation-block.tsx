@@ -24,7 +24,7 @@ import {
   GripVertical
 } from 'lucide-react'
 import { ReservationContextMenu } from '../context-menu/reservation-context-menu'
-import type { RackReserva } from '@/types/rack'
+import type { RackReserva, RackHabitacion } from '@/types/rack'
 
 type Props = {
   reserva: RackReserva
@@ -33,9 +33,12 @@ type Props = {
   onUpdate: () => void
   onResizeStart?: (reservaId: string) => void
   onResizeEnd?: (reservaId: string, newNights: number, newFechaSalida: string) => void
+  // Funciones para actualizaciones optimistas
+  updateHabitacionOptimistic?: (habitacionId: string, updates: Partial<Pick<RackHabitacion, 'estado_limpieza' | 'estado_ocupacion' | 'estado_servicio'>>) => void
+  removeReservaOptimistic?: (reservaId: string) => void
 }
 
-export function ReservationBlock({ reserva, nights, onClick, onUpdate }: Props) {
+export function ReservationBlock({ reserva, nights, onClick, onUpdate, updateHabitacionOptimistic, removeReservaOptimistic }: Props) {
   // Colores según estado
   const getStatusColor = (estado: string) => {
     if (estado === 'CHECKED_IN') return 'bg-green-500 border-green-600 hover:bg-green-600'
@@ -171,7 +174,7 @@ export function ReservationBlock({ reserva, nights, onClick, onUpdate }: Props) 
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>
-        <ReservationContextMenu reserva={reserva} onUpdate={onUpdate}>
+        <ReservationContextMenu reserva={reserva} onUpdate={onUpdate} updateHabitacionOptimistic={updateHabitacionOptimistic} removeReservaOptimistic={removeReservaOptimistic}>
           <TooltipTrigger asChild>
             <div
               className={cn(

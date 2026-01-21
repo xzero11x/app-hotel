@@ -1,7 +1,6 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { revalidatePath } from 'next/cache'
 import { getSaldoPendiente } from './pagos'
 import { logger } from '@/lib/logger'
 import { getErrorMessage } from '@/lib/errors'
@@ -156,10 +155,8 @@ export async function realizarCheckout(input: CheckoutInput): Promise<CheckoutRe
     }
   }
 
-  // 5. Revalidar páginas
-  revalidatePath('/rack')
-  revalidatePath('/reservas')
-  revalidatePath('/habitaciones')
+  // 5. Checkout completado - Realtime actualizará la UI automáticamente
+  // NOTA: No usar revalidatePath - no funciona con Client Components
 
   return {
     success: true,

@@ -441,6 +441,7 @@ CHECK (precio_minimo <= precio_base)
 | tipo_documento | TEXT | NOT NULL | DNI, Pasaporte, CE, RUC |
 | numero_documento | TEXT | NOT NULL | Número del documento |
 | nacionalidad | TEXT | NULL | País de nacionalidad |
+| procedencia_departamento | TEXT | NULL | Región/Departamento de procedencia |
 | correo | TEXT | NULL | Email de contacto |
 | telefono | TEXT | NULL | Teléfono |
 | fecha_nacimiento | DATE | NULL | Para calcular edad |
@@ -531,12 +532,26 @@ UNIQUE(reserva_id, huesped_id)
 | usuario_id | UUID | FK NOT NULL | Usuario responsable |
 | fecha_apertura | TIMESTAMPTZ | DEFAULT now() | Timestamp de apertura |
 | fecha_cierre | TIMESTAMPTZ | NULL | Timestamp de cierre |
-| monto_apertura | NUMERIC(12,2) | DEFAULT 0 | Efectivo inicial PEN |
-| monto_cierre_declarado | NUMERIC(12,2) | NULL | Efectivo final declarado PEN |
-| monto_cierre_sistema | NUMERIC(12,2) | NULL | Efectivo final calculado PEN |
+| **EFECTIVO (CUADRE)** | | | |
+| monto_apertura_efectivo | NUMERIC(12,2) | DEFAULT 0 | Efectivo inicial PEN |
+| monto_cierre_teorico_efectivo | NUMERIC(12,2) | NULL | Calculado: Inicio + Ingresos - Egresos |
+| monto_cierre_real_efectivo | NUMERIC(12,2) | NULL | Contado por el usuario |
+| descuadre_efectivo | NUMERIC(12,2) | GENERATED | Real - Teórico |
+| **MULTIMONEDA** | | | |
 | monto_apertura_usd | NUMERIC(12,2) | DEFAULT 0 | Efectivo inicial USD |
-| monto_cierre_declarado_usd | NUMERIC(12,2) | NULL | Efectivo final declarado USD |
-| monto_cierre_sistema_usd | NUMERIC(12,2) | NULL | Efectivo final calculado USD |
+| monto_cierre_teorico_usd | NUMERIC(12,2) | DEFAULT 0 | Calculado USD |
+| monto_cierre_real_usd | NUMERIC(12,2) | DEFAULT 0 | Contado USD |
+| **TOTALES (REGISTRO)** | | | |
+| total_efectivo | NUMERIC(12,2) | DEFAULT 0 | Total cobrado en efectivo |
+| total_tarjeta | NUMERIC(12,2) | DEFAULT 0 | Total cobrado en tarjeta |
+| total_transferencia | NUMERIC(12,2) | DEFAULT 0 | Total transferencias |
+| total_yape | NUMERIC(12,2) | DEFAULT 0 | Total billeteras digitales |
+| total_digital | NUMERIC(12,2) | GENERATED | Suma de no-efectivo |
+| total_vendido | NUMERIC(12,2) | GENERATED | Suma total general |
+| **CONTROL** | | | |
+| requiere_autorizacion | BOOLEAN | DEFAULT FALSE | Si hubo descuadre mayor al límite |
+| autorizado_por | UUID | FK NULL | Supervisor que autorizó |
+| observaciones_cierre | TEXT | NULL | Notas del cierre |
 | estado | TEXT | CHECK | ABIERTA, CERRADA |
 
 #### 3.3.3 series_comprobante
@@ -648,15 +663,19 @@ Si la factura tiene snapshot:
 | ubigeo_codigo | TEXT | Código de ubigeo |
 | telefono | TEXT | Teléfono del hotel |
 | email | TEXT | Email institucional |
+| pagina_web | TEXT | URL sitio web |
+| logo_url | TEXT | URL del logo |
+| descripcion | TEXT | Descripción corta del hotel |
 | **CONFIGURACIÓN TRIBUTARIA** | | |
 | tasa_igv | NUMERIC(5,2) | Tasa IGV (ej: 18.00) |
 | tasa_icbper | NUMERIC(5,2) | Impuesto bolsas (ej: 0.50) |
 | es_exonerado_igv | BOOLEAN | Si está en zona exonerada |
 | facturacion_activa | BOOLEAN | Si emite CPE |
-| proveedor_sunat_config | JSONB | Config del PSE/OSE |
+| proveedor_metadata | JSONB | Config del PSE/OSE |
 | **CONFIGURACIÓN OPERATIVA** | | |
 | hora_checkin | TIME | Hora estándar check-in |
 | hora_checkout | TIME | Hora estándar check-out |
+| moneda_principal | TEXT | Moneda base (PEN/USD) |
 | updated_at |TIMESTAMPTZ | Última modificación |
 
 **Constraint:**
@@ -698,6 +717,7 @@ CREATE UNIQUE INDEX only_one_config_row ON hotel_configuracion ((true));
 | hash_cpe | TEXT | ⚠️ Actualizable | Hash SUNAT |
 | cdr_url | TEXT | ⚠️ Actualizable | URL CDR |
 | xml_url | TEXT | ⚠️ Actualizable | URL XML |
+| pdf_url | TEXT | ⚠️ Actualizable | URL PDF |
 | external_id | TEXT | ⚠️ Actualizable | ID externo |
 | **NOTAS DE CRÉDITO** | | | |
 | nota_credito_ref_id | UUID FK | ❌ Ref | Si es NC |
@@ -1259,28 +1279,44 @@ Definir en settings qué opción (A, B o C) usar
 - Monto > 0
 - Si método = TARJETA: referencia es obligatoria
 
-#### RF-020: Cierre de Caja
-**Prioridad:** Alta  
+#### RF-020: Registrar Movimiento Manual
+**Prioridad:** Media
+**Descripción:** Registrar ingresos o egresos de caja no vinculados a reservas (ej: gastos menores, ingreso de sencillo)
+
+**Datos requeridos:**
+- Tipo: INGRESO o EGRESO
+- Categoría (ej: "Movilidad", "Compra insumos", "Sencillo")
+- Monto y Moneda
+- Motivo (descripción obligatoria)
+- Comprobante referencia (opcional)
+- Foto/Evidencia (opcional)
+
+**Validaciones:**
+- Turno debe estar ABIERTO
+- Monto > 0
+- Motivo debe tener al menos 5 caracteres
+
+#### RF-021: Cierre de Caja
+**Prioridad:** Alta
 **Descripción:** Finalizar turno y arqueo
 
 **Flujo:**
-1. Contar efectivo final:
-   - Declarado PEN
-   - Declarado USD
-2. Sistema calcula efectivo según movimientos:
+1. Contar efectivo final físico (Real):
+   - Billetes y monedas en PEN
+   - Billetes y monedas en USD
+2. Sistema calcula efectivo teórico:
    ```
-   monto_cierre_sistema_pen = 
-     monto_apertura_pen 
-     + SUM(pagos en efectivo PEN)
-     - SUM(egresos PEN)
+   Teórico = Apertura + Ingresos - Egresos
    ```
-3. Comparar:
-   - Si cuadra: ✅ OK
-   - Si no cuadra: ⚠️ Mostrar diferencia (faltante/sobrante)
-4. Guardar:
-   - fecha_cierre = NOW()
-   - montos declarados y calculados
-   - estado = CERRADA
+3. Calcular Descuadre:
+   - `Descuadre = Real - Teórico`
+4. Validación de Descuadre:
+   - Si `ABS(Descuadre) <= Límite` (ej: S/ 10.00): ✅ Cierre automático permitido
+   - Si `ABS(Descuadre) > Límite`: 🔐 Requiere autorización de Supervisor
+5. Guardar cierre:
+   - Registrar fecha, montos reales, teóricos y descuadre
+   - Si hubo autorización: registrar `autorizado_por`
+   - Estado = CERRADA
 
 **Restricciones:**
 - No se pueden hacer ventas después del cierre
@@ -1288,24 +1324,10 @@ Definir en settings qué opción (A, B o C) usar
 
 ### 5.7 Módulo de Reportes
 
-#### RF-021: Dashboard Operativo
+#### RF-022: Dashboard Operativo
 **Prioridad:** Alta  
-**Descripción:** Vista general del estado actual
 
-**KPIs:**
-- Total habitaciones
-- Disponibles ahora
-- Ocupadas
-- En limpieza
-- Fuera de servicio
-- Porcentaje de ocupación
-
-**Secciones:**
-- Llegadas del día (check-ins pendientes)
-- Salidas del día (check-outs esperados)
-- Habitaciones sucias (requieren atención)
-
-#### RF-022: Reporte de Ventas por Canal
+#### RF-023: Reporte de Ventas por Canal
 **Prioridad:** Media  
 **Descripción:** Análisis de rentabilidad por origen
 
@@ -1320,7 +1342,7 @@ Definir en settings qué opción (A, B o C) usar
 | Booking | 30 | 85 | S/ 12,750 | S/ 1,913 | S/ 10,838 |
 | Web | 15 | 40 | S/ 6,000 | S/ 0 | S/ 6,000 |
 
-#### RF-023: Historial de Facturación
+#### RF-024: Historial de Facturación
 **Prioridad:** Alta  
 **Descripción:** Listado de todos los comprobantes emitidos
 
@@ -1342,7 +1364,7 @@ Definir en settings qué opción (A, B o C) usar
 - 🔄 Reenviar (si PENDIENTE)
 - ❌ Anular (si ACEPTADO)
 
-#### RF-024: Registro de Ventas (Libro)
+#### RF-025: Registro de Ventas (Libro)
 **Prioridad:** Alta  
 **Descripción:** Exportación para contabilidad
 
@@ -1361,7 +1383,7 @@ Definir en settings qué opción (A, B o C) usar
 - Mes específico
 - Año completo
 
-#### RF-025: Reporte PLE 14.1
+#### RF-026: Reporte PLE 14.1
 **Prioridad:** Media  
 **Descripción:** Programa de Libros Electrónicos
 

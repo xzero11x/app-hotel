@@ -145,9 +145,10 @@ export function ReservasHistorialTable() {
           onCobrar: handleCobrar
         }}
         toolbar={
-          <div className="flex flex-wrap items-center gap-2 w-full">
+          <div className="flex items-center gap-2 w-full overflow-x-auto scrollbar-hide">
             {/* Tabs integrados como filtro principal */}
-            <Tabs value={estado} onValueChange={setEstado}>
+            <Tabs value={estado} onValueChange={setEstado} className="flex-shrink-0">
+
               <TabsList className="h-8 bg-muted/60 p-0.5">
                 <TabsTrigger value="TODAS" className="h-7 text-sm px-3">Todas</TabsTrigger>
                 <TabsTrigger value="CHECKED_IN" className="h-7 text-sm px-3">En Casa</TabsTrigger>
@@ -157,29 +158,33 @@ export function ReservasHistorialTable() {
               </TabsList>
             </Tabs>
 
-            <div className="relative w-[350px]">
+            <div className="relative w-[350px] flex-shrink-0">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar huésped o código..."
+                placeholder="Buscar huésped, código o habitación..."
                 className="pl-8 h-8"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
 
-            <div className="flex items-center gap-1 ml-auto md:ml-0">
+            <div className="flex items-center gap-1 ml-auto md:ml-0 flex-shrink-0">
               <Input
                 type="date"
+                placeholder="Desde"
                 className="h-8 w-auto min-w-[110px]"
                 value={fechaInicio}
                 onChange={(e) => setFechaInicio(e.target.value)}
+                title="Fecha de inicio del rango"
               />
               <span className="text-muted-foreground">-</span>
               <Input
                 type="date"
+                placeholder="Hasta"
                 className="h-8 w-auto min-w-[110px]"
                 value={fechaFin}
                 onChange={(e) => setFechaFin(e.target.value)}
+                title="Fecha de fin del rango"
               />
             </div>
           </div>

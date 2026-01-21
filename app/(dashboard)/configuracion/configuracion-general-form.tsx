@@ -20,12 +20,13 @@ export function ConfiguracionGeneralForm({ initialData }: Props) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
-  
+
   const [formData, setFormData] = useState({
     ruc: initialData?.ruc || '',
     razon_social: initialData?.razon_social || '',
     nombre_comercial: initialData?.nombre_comercial || '',
     direccion_fiscal: initialData?.direccion_fiscal || '',
+    ubigeo_codigo: initialData?.ubigeo_codigo || '',
     telefono: initialData?.telefono || '',
     email: initialData?.email || '',
     pagina_web: initialData?.pagina_web || '',
@@ -39,19 +40,79 @@ export function ConfiguracionGeneralForm({ initialData }: Props) {
     facturacion_activa: initialData?.facturacion_activa ?? false,
   })
 
+  // Validación de RUC peruano (11 dígitos con dígito verificador)
+  function validarRUC(ruc: string): { valido: boolean; error?: string } {
+    if (!ruc) return { valido: false, error: 'RUC es requerido' }
+    if (!/^\d{11}$/.test(ruc)) {
+      return { valido: false, error: 'RUC debe tener 11 dígitos' }
+    }
+    const prefijosValidos = ['10', '15', '17', '20']
+    if (!prefijosValidos.some(p => ruc.startsWith(p))) {
+      return { valido: false, error: 'RUC debe iniciar con 10, 15, 17 o 20' }
+    }
+    // Algoritmo de dígito verificador SUNAT (módulo 11)
+    const factores = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+    let suma = 0
+    for (let i = 0; i < 10; i++) {
+      suma += parseInt(ruc[i]) * factores[i]
+    }
+    // Fórmula correcta: (11 - (suma % 11)) % 11, si es 10 se usa 0
+    const resto = suma % 11
+    let digitoVerificador = 11 - resto
+    if (digitoVerificador >= 10) digitoVerificador = digitoVerificador - 10
+
+    if (parseInt(ruc[10]) !== digitoVerificador) {
+      return { valido: false, error: 'Dígito verificador de RUC inválido' }
+    }
+    return { valido: true }
+  }
+
   const updateField = (field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    // Validar RUC si facturación está activa
+    if (formData.facturacion_activa) {
+      const rucValidation = validarRUC(formData.ruc)
+      if (!rucValidation.valido) {
+        toast.error(rucValidation.error)
+        return
+      }
+      if (!formData.razon_social || formData.razon_social === 'MI HOTEL S.A.C.') {
+        toast.error('Debe configurar la razón social real del hotel')
+        return
+      }
+      if (!formData.direccion_fiscal) {
+        toast.error('Debe configurar la dirección fiscal')
+        return
+      }
+    }
+
     setSaving(true)
 
     try {
-      await updateHotelConfig(formData)
-      toast.success('Configuración guardada exitosamente')
-      setIsEditing(false)
-      router.refresh()
+      // Limpiar datos: campos vacíos deben ser null para evitar errores de constraint
+      const dataToSave = {
+        ...formData,
+        ubigeo_codigo: formData.ubigeo_codigo?.trim() || null,
+        telefono: formData.telefono?.trim() || null,
+        email: formData.email?.trim() || null,
+        pagina_web: formData.pagina_web?.trim() || null,
+        descripcion: formData.descripcion?.trim() || null,
+      }
+
+      const result = await updateHotelConfig(dataToSave)
+
+      if (result.success) {
+        toast.success('Configuración guardada exitosamente')
+        setIsEditing(false)
+        router.refresh()
+      } else {
+        toast.error(result.error || 'Error al guardar la configuración')
+      }
     } catch (error) {
       console.error('Error saving configuration:', error)
       toast.error('Error al guardar la configuración')
@@ -63,7 +124,7 @@ export function ConfiguracionGeneralForm({ initialData }: Props) {
   const handleCancel = () => {
     setIsEditing(false)
     // Resetear form a valores iniciales (simple reload o reset state si tuviéramos backup)
-    router.refresh() 
+    router.refresh()
   }
 
   return (
@@ -139,6 +200,23 @@ export function ConfiguracionGeneralForm({ initialData }: Props) {
               placeholder="Av. Principal 123, Lima"
               disabled={!isEditing || saving}
             />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="ubigeo_codigo">Ubigeo (Código SUNAT)</Label>
+              <Input
+                id="ubigeo_codigo"
+                value={formData.ubigeo_codigo}
+                onChange={(e) => updateField('ubigeo_codigo', e.target.value)}
+                placeholder="150101"
+                maxLength={6}
+                disabled={!isEditing || saving}
+              />
+              <p className="text-xs text-muted-foreground">
+                6 dígitos del distrito (ej: 150101 para Lima Centro)
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

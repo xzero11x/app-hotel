@@ -1,7 +1,6 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { revalidatePath } from 'next/cache'
 import { logger } from '@/lib/logger'
 import { getErrorMessage } from '@/lib/errors'
 import { esTransicionValida } from '@/lib/utils/validaciones-reservas'
@@ -103,8 +102,7 @@ export async function toggleHuespedPresente(reservaId: string, presente: boolean
 
     if (error) throw error
 
-    revalidatePath('/rack')
-    revalidatePath(`/reservas/${reservaId}`)
+    // NOTA: No usar revalidatePath - Realtime + optimistic updates manejan la UI
     return { success: true }
   } catch (error: unknown) {
     logger.error('Error al actualizar estado del huésped', {

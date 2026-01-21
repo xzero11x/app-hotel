@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,14 +13,16 @@ import {
 } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2, User, Users } from 'lucide-react'
+import { Plus, Trash2, User, Users, Search, CheckCircle2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { HuespedConRelacion } from '@/lib/actions/huespedes'
 import { NacionalidadCombobox } from '@/components/custom/nacionalidad-combobox'
 import { DepartamentoCombobox } from '@/components/custom/departamento-combobox'
+import { buscarHuespedPorDocumento } from '@/lib/actions/checkin'
 
 interface HuespedFormData {
   id: string // ID temporal para el formulario
+  huesped_bd_id?: string // ID real en la BD si existe
   nombres: string
   apellidos: string
   tipo_documento: 'DNI' | 'PASAPORTE' | 'CE' | 'OTRO'
@@ -31,6 +33,7 @@ interface HuespedFormData {
   telefono: string
   fecha_nacimiento: string
   es_titular: boolean
+  es_existente: boolean // Flag para saber si viene de la BD
 }
 
 interface Props {
@@ -107,11 +110,58 @@ export function HuespedesForm({ onSubmit, initialData, submitButtonText = 'Guard
         telefono: '',
         fecha_nacimiento: '',
         es_titular: true,
+        es_existente: false,
       },
     ]
   )
 
   const [loading, setLoading] = useState(false)
+  const [buscando, setBuscando] = useState<Record<string, boolean>>({})
+
+  // Función para buscar huésped por documento
+  const buscarHuesped = useCallback(async (huespedId: string, tipoDoc: string, numDoc: string) => {
+    if (!numDoc || numDoc.length < 3) return // Mínimo 3 caracteres para buscar
+
+    setBuscando(prev => ({ ...prev, [huespedId]: true }))
+
+    try {
+      const result = await buscarHuespedPorDocumento(numDoc, tipoDoc)
+
+      if (result.huesped) {
+        // Huésped encontrado: autocompleta los campos
+        setHuespedes(prev => prev.map(h => {
+          if (h.id === huespedId) {
+            toast.success(`Huésped encontrado: ${result.huesped.nombres} ${result.huesped.apellidos}`)
+            return {
+              ...h,
+              huesped_bd_id: result.huesped.id,
+              nombres: result.huesped.nombres || '',
+              apellidos: result.huesped.apellidos || '',
+              nacionalidad: result.huesped.nacionalidad || 'Peruana',
+              procedencia_departamento: result.huesped.procedencia_departamento || '',
+              correo: result.huesped.correo || '',
+              telefono: result.huesped.telefono || '',
+              fecha_nacimiento: result.huesped.fecha_nacimiento || '',
+              es_existente: true,
+            }
+          }
+          return h
+        }))
+      } else {
+        // No existe: marcar como nuevo
+        setHuespedes(prev => prev.map(h => {
+          if (h.id === huespedId) {
+            return { ...h, huesped_bd_id: undefined, es_existente: false }
+          }
+          return h
+        }))
+      }
+    } catch (error) {
+      console.error('Error buscando huésped:', error)
+    } finally {
+      setBuscando(prev => ({ ...prev, [huespedId]: false }))
+    }
+  }, [])
 
   const agregarAcompanante = () => {
     setHuespedes([
@@ -128,6 +178,7 @@ export function HuespedesForm({ onSubmit, initialData, submitButtonText = 'Guard
         telefono: '',
         fecha_nacimiento: '',
         es_titular: false,
+        es_existente: false,
       },
     ])
   }
@@ -288,14 +339,30 @@ export function HuespedesForm({ onSubmit, initialData, submitButtonText = 'Guard
                 <Label htmlFor="nro-doc-titular">
                   Número Documento <span className="text-red-500">*</span>
                 </Label>
-                <Input
-                  id="nro-doc-titular"
-                  value={titular.numero_documento}
-                  onChange={(e) =>
-                    actualizarHuesped(titular.id, 'numero_documento', e.target.value)
-                  }
-                  required
-                />
+                <div className="relative">
+                  <Input
+                    id="nro-doc-titular"
+                    value={titular.numero_documento}
+                    onChange={(e) =>
+                      actualizarHuesped(titular.id, 'numero_documento', e.target.value)
+                    }
+                    onBlur={() => buscarHuesped(titular.id, titular.tipo_documento, titular.numero_documento)}
+                    placeholder="Ingrese documento y presione Tab para buscar"
+                    required
+                  />
+                  {buscando[titular.id] && (
+                    <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                  )}
+                  {titular.es_existente && !buscando[titular.id] && (
+                    <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-500" />
+                  )}
+                </div>
+                {titular.es_existente && (
+                  <Badge variant="secondary" className="mt-1 text-xs">
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    Huésped frecuente
+                  </Badge>
+                )}
               </div>
 
               <div>
@@ -447,13 +514,29 @@ export function HuespedesForm({ onSubmit, initialData, submitButtonText = 'Guard
                     <Label>
                       Número Documento <span className="text-red-500">*</span>
                     </Label>
-                    <Input
-                      value={acomp.numero_documento}
-                      onChange={(e) =>
-                        actualizarHuesped(acomp.id, 'numero_documento', e.target.value)
-                      }
-                      required
-                    />
+                    <div className="relative">
+                      <Input
+                        value={acomp.numero_documento}
+                        onChange={(e) =>
+                          actualizarHuesped(acomp.id, 'numero_documento', e.target.value)
+                        }
+                        onBlur={() => buscarHuesped(acomp.id, acomp.tipo_documento, acomp.numero_documento)}
+                        placeholder="Tab para buscar"
+                        required
+                      />
+                      {buscando[acomp.id] && (
+                        <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                      )}
+                      {acomp.es_existente && !buscando[acomp.id] && (
+                        <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-green-500" />
+                      )}
+                    </div>
+                    {acomp.es_existente && (
+                      <Badge variant="secondary" className="mt-1 text-xs">
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        Existente
+                      </Badge>
+                    )}
                   </div>
 
                   <div>

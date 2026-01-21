@@ -64,6 +64,9 @@ export async function getRackReservas(fechaInicio: Date, fechaFin: Date) {
       id,
       codigo_reserva,
       habitacion_id,
+      habitaciones (
+        numero
+      ),
       fecha_entrada,
       fecha_salida,
       estado,
@@ -72,7 +75,9 @@ export async function getRackReservas(fechaInicio: Date, fechaFin: Date) {
       reserva_huespedes!inner (
         huespedes (
           nombres,
-          apellidos
+          apellidos,
+          tipo_documento,
+          numero_documento
         )
       ),
       canales_venta:canal_venta_id (
@@ -270,7 +275,18 @@ export async function crearReservaDesdeRack(data: {
   }
 
   // Paso 2: Registrar todos los huéspedes (titular + acompañantes)
-  await registrarHuespedesEnReserva(reserva.id, data.huespedes)
+  const resultadoHuespedes = await registrarHuespedesEnReserva(reserva.id, data.huespedes)
+
+  // CRÍTICO: Si falla la vinculación, eliminar la reserva para evitar huérfanas
+  if (!resultadoHuespedes.success) {
+    logger.error('Fallback en crearReservaDesdeRack: eliminando reserva huérfana', {
+      action: 'crearReservaDesdeRack',
+      reservaId: reserva.id,
+      error: resultadoHuespedes.error
+    })
+    await supabase.from('reservas').delete().eq('id', reserva.id)
+    throw new Error(resultadoHuespedes.error || 'Error al vincular huéspedes con la reserva')
+  }
 
   // NOTA: El registro de pagos se ha movido al flujo de facturación (cobrarYFacturar).
   // Ya no se registran pagos directos al crear la reserva para garantizar integridad fiscal.

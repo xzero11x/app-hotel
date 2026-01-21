@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getHistorialComprobantes } from '@/lib/actions/comprobantes'
+import { getHistorialComprobantes, reenviarComprobanteNubefact } from '@/lib/actions/comprobantes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Search, Eye, AlertCircle } from 'lucide-react'
+import { Search, Eye, AlertCircle, RefreshCw, Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ComprobanteDetailSheet } from '@/components/facturacion/comprobante-detail-sheet'
@@ -31,6 +31,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toast } from 'sonner'
 
 type Comprobante = {
   id: string
@@ -49,15 +50,18 @@ type Comprobante = {
 export function HistorialVentasTable() {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [loading, setLoading] = useState(true)
-  
+
   // Filtros
   const [filtroTipo, setFiltroTipo] = useState<'TODAS' | 'BOLETA' | 'FACTURA' | 'NOTA_CREDITO'>('TODAS')
   const [filtroEstado, setFiltroEstado] = useState<'TODOS' | 'PENDIENTE' | 'ACEPTADO' | 'RECHAZADO' | 'ANULADO'>('TODOS')
   const [busqueda, setBusqueda] = useState('')
-  
+
   // Sheet
   const [selectedComprobanteId, setSelectedComprobanteId] = useState<string | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
+
+  // Reenvío
+  const [reenviandoId, setReenviandoId] = useState<string | null>(null)
 
   useEffect(() => {
     cargarComprobantes()
@@ -76,6 +80,23 @@ export function HistorialVentasTable() {
       console.error('Error al cargar comprobantes:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleReenviar(comprobanteId: string) {
+    setReenviandoId(comprobanteId)
+    try {
+      const result = await reenviarComprobanteNubefact(comprobanteId)
+      if (result.success) {
+        toast.success('Comprobante enviado exitosamente a SUNAT')
+        cargarComprobantes() // Recargar lista
+      } else {
+        toast.error(result.error || 'Error al reenviar')
+      }
+    } catch (error) {
+      toast.error('Error al reintentar envío')
+    } finally {
+      setReenviandoId(null)
     }
   }
 
@@ -249,14 +270,40 @@ export function HistorialVentasTable() {
                     {comp.moneda} {comp.total_venta.toFixed(2)}
                   </TableCell>
                   <TableCell className="text-center">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleVerDetalle(comp.id)}
-                    >
-                      <Eye className="h-4 w-4 mr-1" />
-                      Ver
-                    </Button>
+                    <div className="flex items-center justify-center gap-1">
+                      {/* Botón Reenviar - solo para PENDIENTE o RECHAZADO */}
+                      {(comp.estado_sunat === 'PENDIENTE' || comp.estado_sunat === 'RECHAZADO') && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleReenviar(comp.id)}
+                                disabled={reenviandoId === comp.id}
+                              >
+                                {reenviandoId === comp.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Reintentar envío a SUNAT</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleVerDetalle(comp.id)}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        Ver
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MoreHorizontal, Eye, FileText, Download, XCircle, Receipt, FileSpreadsheet, FileMinus, Ticket, CreditCard, Smartphone, Building2, Banknote, ExternalLink } from 'lucide-react'
+import { MoreHorizontal, Eye, FileText, Download, XCircle, Receipt, FileSpreadsheet, FileMinus, Ticket, CreditCard, Smartphone, Building2, Banknote, ExternalLink, RefreshCw } from 'lucide-react'
 import { DataTableColumnHeader } from '@/components/tables/data-table-column-header'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -31,6 +31,9 @@ export type Comprobante = {
   metodo_pago?: string
   reserva_id?: string
   codigo_reserva?: string
+  pdf_url?: string | null
+  xml_url?: string | null
+  cdr_url?: string | null
 }
 
 const formatCurrency = (amount: number, currency: string = 'PEN') => {
@@ -101,13 +104,13 @@ export const comprobantesColumns: ColumnDef<Comprobante>[] = [
     cell: ({ row, table }) => {
       const comprobante = row.original
       const meta = table.options.meta as any
-      
+
       if (!comprobante.reserva_id || !comprobante.codigo_reserva) {
         return (
           <span className="text-xs text-muted-foreground italic">Venta directa</span>
         )
       }
-      
+
       return (
         <Button
           variant="link"
@@ -163,7 +166,7 @@ export const comprobantesColumns: ColumnDef<Comprobante>[] = [
   {
     accessorKey: 'estado_sunat',
     header: 'SUNAT',
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const estado = row.getValue('estado_sunat') as string
       const variants: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string; label: string }> = {
         'PENDIENTE': { variant: 'secondary', label: 'Pendiente' },
@@ -171,13 +174,30 @@ export const comprobantesColumns: ColumnDef<Comprobante>[] = [
         'RECHAZADO': { variant: 'destructive', label: 'Rechazado' },
         'ANULADO': { variant: 'outline', label: 'Anulado' }
       }
-      
+
       const config = variants[estado] || { variant: 'outline' as const, label: estado }
-      
+      const meta = table.options.meta as any
+
       return (
-        <Badge variant={config.variant} className={config.className || ''}>
-          {config.label}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={config.variant} className={config.className || ''}>
+            {config.label}
+          </Badge>
+          {(estado === 'PENDIENTE' || estado === 'RECHAZADO') && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              title="Actualizar estado desde SUNAT"
+              onClick={(e) => {
+                e.stopPropagation()
+                meta?.onActualizarEstado?.(row.original.id)
+              }}
+            >
+              <RefreshCw className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
       )
     },
   },
@@ -205,15 +225,15 @@ export const comprobantesColumns: ColumnDef<Comprobante>[] = [
               <Download className="mr-2 h-4 w-4" />
               Descargar PDF
             </DropdownMenuItem>
-            {comprobante.estado_sunat === 'ACEPTADO' && (
+            {(comprobante.estado_sunat === 'ACEPTADO' || comprobante.estado_sunat === 'PENDIENTE') && comprobante.tipo_comprobante !== 'NOTA_CREDITO' && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => meta?.onAnular?.(comprobante.id)}
-                  className="text-destructive"
+                  className="text-orange-600"
                 >
-                  <XCircle className="mr-2 h-4 w-4" />
-                  Anular
+                  <FileMinus className="mr-2 h-4 w-4" />
+                  Emitir Nota de Crédito
                 </DropdownMenuItem>
               </>
             )}

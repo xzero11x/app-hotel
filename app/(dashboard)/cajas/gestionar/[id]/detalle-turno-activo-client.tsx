@@ -78,6 +78,16 @@ export function DetalleTurnoActivoClient({ turnoId, turnoInicial }: Props) {
     }
 
     const movimientosIngresos = turno.movimientos.filter(m => m.tipo === 'INGRESO')
+    const movimientosEgresos = turno.movimientos.filter(m => m.tipo === 'EGRESO')
+
+    // Calcular devoluciones (egresos con categoría DEVOLUCION o motivo que contenga "Devolución")
+    const movimientosDevoluciones = movimientosEgresos.filter(m =>
+        m.categoria === 'DEVOLUCION' ||
+        (m.motivo && m.motivo.toLowerCase().includes('devolución'))
+    )
+    const cantidadDevoluciones = movimientosDevoluciones.length
+    const montoDevoluciones = movimientosDevoluciones.reduce((acc, m) => acc + (m.monto || 0), 0)
+
     const cantidadVentas = movimientosIngresos.length
     const ticketPromedio = cantidadVentas > 0 ? turno.estadisticas.total_ingresos_pen / cantidadVentas : 0
 
@@ -110,60 +120,101 @@ export function DetalleTurnoActivoClient({ turnoId, turnoInicial }: Props) {
                 Esta sesión fue abierta el {format(new Date(turno.turno.fecha_apertura), "d 'de' MMMM, yyyy, h:mm a", { locale: es })}
             </div>
 
-            {/* KPIs Fila 1 - SIN Monto Real Contado ni Diferencia */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {/* Saldo Inicial */}
-                <Card>
-                    <CardContent className="pt-4">
-                        <div className="flex items-start justify-between">
-                            <p className="text-sm text-muted-foreground">Saldo Inicial</p>
-                            <Flag className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <p className="text-2xl font-bold mt-2">
-                            S/ {turno.turno.monto_apertura_efectivo.toFixed(2)}
-                        </p>
-                    </CardContent>
-                </Card>
+            {/* CÁLCULO DE BALANCE TOTAL */}
+            {(() => {
+                // Balance Total = Apertura + Ingresos Totales - Egresos Totales
+                // Nota: total_egresos_pen ya incluye devoluciones
+                const balanceTotal = turno.turno.monto_apertura_efectivo + turno.estadisticas.total_ingresos_pen - turno.estadisticas.total_egresos_pen
 
-                {/* Total Ingresos */}
-                <Card className="border-green-200">
-                    <CardContent className="pt-4">
-                        <div className="flex items-start justify-between">
-                            <p className="text-sm text-green-600 font-medium">Total Ingresos</p>
-                            <TrendingUp className="h-4 w-4 text-green-600" />
-                        </div>
-                        <p className="text-2xl font-bold text-green-600 mt-2">
-                            S/ {turno.estadisticas.total_ingresos_pen.toFixed(2)}
-                        </p>
-                    </CardContent>
-                </Card>
+                // Efectivo Teórico = Apertura + Ingresos Efectivo - Egresos Efectivo
+                // porMetodo.efectivo (que viene del server) ya debería restar egresos de efectivo
+                const efectivoTeorico = turno.turno.monto_apertura_efectivo + porMetodo.efectivo
 
-                {/* Total Egresos */}
-                <Card className="border-red-200">
-                    <CardContent className="pt-4">
-                        <div className="flex items-start justify-between">
-                            <p className="text-sm text-red-600 font-medium">Total Egresos</p>
-                            <TrendingDown className="h-4 w-4 text-red-600" />
-                        </div>
-                        <p className="text-2xl font-bold text-red-600 mt-2">
-                            S/ {turno.estadisticas.total_egresos_pen.toFixed(2)}
-                        </p>
-                    </CardContent>
-                </Card>
+                return (
+                    <>
+                        {/* KPIs Fila 1 - Resumen Financiero Global */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {/* Saldo Inicial */}
+                            <Card>
+                                <CardContent className="pt-4">
+                                    <div className="flex items-start justify-between">
+                                        <p className="text-sm text-muted-foreground">Saldo Inicial</p>
+                                        <Flag className="h-4 w-4 text-muted-foreground" />
+                                    </div>
+                                    <p className="text-2xl font-bold mt-2">
+                                        S/ {turno.turno.monto_apertura_efectivo.toFixed(2)}
+                                    </p>
+                                </CardContent>
+                            </Card>
 
-                {/* Saldo en Caja (Teórico) */}
-                <Card className="border-blue-200 bg-blue-50/50">
-                    <CardContent className="pt-4">
-                        <div className="flex items-start justify-between">
-                            <p className="text-sm text-blue-600 font-medium">Saldo en Caja (Teórico)</p>
-                            <Wallet className="h-4 w-4 text-blue-600" />
+                            {/* Total Ingresos */}
+                            <Card className="border-green-100">
+                                <CardContent className="pt-4">
+                                    <div className="flex items-start justify-between">
+                                        <p className="text-sm text-green-600 font-medium">Total Ingresos</p>
+                                        <TrendingUp className="h-4 w-4 text-green-600" />
+                                    </div>
+                                    <p className="text-2xl font-bold text-green-600 mt-2">
+                                        S/ {turno.estadisticas.total_ingresos_pen.toFixed(2)}
+                                    </p>
+                                </CardContent>
+                            </Card>
+
+                            {/* Total Egresos */}
+                            <Card className="border-red-100">
+                                <CardContent className="pt-4">
+                                    <div className="flex items-start justify-between">
+                                        <p className="text-sm text-red-600 font-medium">Total Egresos</p>
+                                        <TrendingDown className="h-4 w-4 text-red-600" />
+                                    </div>
+                                    <p className="text-2xl font-bold text-red-600 mt-2">
+                                        S/ {turno.estadisticas.total_egresos_pen.toFixed(2)}
+                                    </p>
+                                </CardContent>
+                            </Card>
+
+                            {/* Balance Total (Global) */}
+                            <Card className="border-purple-200 bg-purple-50/50">
+                                <CardContent className="pt-4">
+                                    <div className="flex items-start justify-between">
+                                        <div className="space-y-1">
+                                            <p className="text-sm text-purple-700 font-medium">Balance Total (Global)</p>
+                                        </div>
+                                        <DollarSign className="h-4 w-4 text-purple-700" />
+                                    </div>
+                                    <p className="text-2xl font-bold text-purple-700 mt-2">
+                                        S/ {balanceTotal.toFixed(2)}
+                                    </p>
+                                    <p className="text-xs text-purple-600/80 mt-1">
+                                        Efectivo + Bancos
+                                    </p>
+                                </CardContent>
+                            </Card>
                         </div>
-                        <p className="text-2xl font-bold text-blue-600 mt-2">
-                            S/ {turno.estadisticas.total_esperado_pen.toFixed(2)}
-                        </p>
-                    </CardContent>
-                </Card>
-            </div>
+
+                        {/* KPIs Fila 2 - Control de Efectivo */}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+                            {/* Efectivo Teórico (Sistema) */}
+                            <Card className="border-blue-200 bg-blue-50/50">
+                                <CardContent className="pt-4">
+                                    <div className="flex items-start justify-between">
+                                        <div className="space-y-1">
+                                            <p className="text-sm text-blue-700 font-medium">Efectivo Teórico (Sistema)</p>
+                                        </div>
+                                        <Wallet className="h-4 w-4 text-blue-700" />
+                                    </div>
+                                    <p className="text-2xl font-bold text-blue-700 mt-2">
+                                        S/ {efectivoTeorico.toFixed(2)}
+                                    </p>
+                                    <p className="text-xs text-blue-600/80 mt-1">
+                                        Debe haber en cajón
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        </div>
+                    </>
+                )
+            })()}
 
             {/* Acciones rápidas */}
             <div className="flex gap-3">
@@ -186,8 +237,8 @@ export function DetalleTurnoActivoClient({ turnoId, turnoInicial }: Props) {
                         <MetodoPagoItem
                             icon={<Banknote className="h-4 w-4" />}
                             nombre="Efectivo"
-                            descripcion="Lo que debe haber en el cajón"
-                            monto={porMetodo.efectivo}
+                            descripcion={`Incluye apertura S/${turno.turno.monto_apertura_efectivo.toFixed(2)}`}
+                            monto={turno.turno.monto_apertura_efectivo + porMetodo.efectivo}
                         />
                         <Separator />
                         <MetodoPagoItem
@@ -244,7 +295,7 @@ export function DetalleTurnoActivoClient({ turnoId, turnoInicial }: Props) {
                             </div>
                             <div className="flex-1">
                                 <p className="text-sm text-muted-foreground">Cantidad de Devoluciones</p>
-                                <p className="font-semibold">0 <span className="text-muted-foreground font-normal">(S/ 0.00)</span></p>
+                                <p className="font-semibold">{cantidadDevoluciones} <span className="text-muted-foreground font-normal">(S/ {montoDevoluciones.toFixed(2)})</span></p>
                             </div>
                         </div>
                     </CardContent>

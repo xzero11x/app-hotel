@@ -166,8 +166,8 @@ export async function updateEstadoLimpieza(habitacionId: string, estado: 'LIMPIA
 
         if (error) throw error
 
-        revalidatePath('/rack')
-        revalidatePath('/habitaciones')
+        // NOTA: No usar revalidatePath aquí - Realtime actualiza la UI
+        // revalidatePath solo funciona con Server Components, no con hooks cliente
         return { success: true }
     } catch (error: any) {
         console.error('Error updateEstadoLimpieza:', error)

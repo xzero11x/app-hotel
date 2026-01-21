@@ -9,13 +9,13 @@ export default function HistorialCierresPage() {
         breadcrumbs={[
           { label: 'Inicio', href: '/' },
           { label: 'Cajas' },
-          { label: 'Historial de Cierres' }
+          { label: 'Retiros Administrativos' }
         ]}
       />
       
       <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
         <div>
-          <h1 className="text-2xl font-bold">Historial de Cierres de Turno</h1>
+          <h1 className="text-2xl font-bold">Retiros Administrativos</h1>
           <p className="text-muted-foreground">
             Consulta todos los cierres de caja y su estado de cuadre
           </p>

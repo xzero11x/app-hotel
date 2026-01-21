@@ -30,9 +30,14 @@ export type RackReserva = {
   huespedes: {
     nombres: string
     apellidos: string
+    tipo_documento: string
+    numero_documento: string
   } | null
   canales_venta: {
     nombre: string
+  } | null
+  habitaciones: {
+    numero: string
   } | null
 }
 

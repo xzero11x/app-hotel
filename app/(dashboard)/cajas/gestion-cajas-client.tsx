@@ -25,6 +25,9 @@ type TurnoActivo = {
         total_esperado_pen: number
         total_ingresos_pen: number
         total_egresos_pen: number
+        desglose_metodos_pago?: {
+            efectivo: number
+        }
     }
 }
 
@@ -56,7 +59,7 @@ export function GestionCajasClient() {
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             {/* Modal Abrir Caja */}
             {showAbrirCaja && (
                 <ModalAperturaTurno
@@ -67,14 +70,14 @@ export function GestionCajasClient() {
             )}
 
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
                 <div>
-                    <h1 className="text-2xl font-bold">Gestión de Cajas</h1>
-                    <p className="text-sm text-muted-foreground">
+                    <h1 className="text-xl sm:text-2xl font-bold">Gestión de Cajas</h1>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
                         Monitoreo en tiempo real y auditoría de cierres
                     </p>
                 </div>
-                <Button onClick={() => setShowAbrirCaja(true)}>
+                <Button onClick={() => setShowAbrirCaja(true)} className="w-full sm:w-auto">
                     <Plus className="h-4 w-4 mr-2" />
                     Abrir Caja
                 </Button>
@@ -82,24 +85,26 @@ export function GestionCajasClient() {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
-                    <TabsTrigger value="monitor" className="flex items-center gap-2">
-                        <Zap className="h-4 w-4" />
-                        Monitor Activo
+                <TabsList className="w-full grid grid-cols-2">
+                    <TabsTrigger value="monitor" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                        <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        <span className="hidden sm:inline">Monitor Activo</span>
+                        <span className="sm:hidden">Monitor</span>
                         {turnosActivos.length > 0 && (
-                            <Badge variant="secondary" className="ml-1">
+                            <Badge variant="secondary" className="ml-1 text-[10px] sm:text-xs px-1 sm:px-2">
                                 {turnosActivos.length}
                             </Badge>
                         )}
                     </TabsTrigger>
-                    <TabsTrigger value="historial" className="flex items-center gap-2">
-                        <History className="h-4 w-4" />
-                        Historial de Cierres
+                    <TabsTrigger value="historial" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                        <History className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        <span className="hidden sm:inline">Historial de Cierres</span>
+                        <span className="sm:hidden">Historial</span>
                     </TabsTrigger>
                 </TabsList>
 
                 {/* Tab: Monitor Activo */}
-                <TabsContent value="monitor" className="mt-6">
+                <TabsContent value="monitor" className="mt-4 sm:mt-6">
                     <MonitorActivoTab
                         turnos={turnosActivos}
                         loading={loading}
@@ -108,7 +113,7 @@ export function GestionCajasClient() {
                 </TabsContent>
 
                 {/* Tab: Historial de Cierres */}
-                <TabsContent value="historial" className="mt-6">
+                <TabsContent value="historial" className="mt-4 sm:mt-6">
                     <HistorialCierresTab />
                 </TabsContent>
             </Tabs>
@@ -158,11 +163,11 @@ function MonitorActivoTab({
     const otrasCajas = turnos.slice(1)
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             {/* Mi caja activa */}
             <div>
-                <div className="flex items-center gap-2 mb-3 text-sm text-muted-foreground">
-                    <User className="h-4 w-4" />
+                <div className="flex items-center gap-2 mb-3 text-xs sm:text-sm text-muted-foreground">
+                    <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     Tu caja activa
                 </div>
                 <CajaActivaCard turno={miCaja} destacada />
@@ -171,10 +176,10 @@ function MonitorActivoTab({
             {/* Otras cajas (si hay más) */}
             {otrasCajas.length > 0 && (
                 <div>
-                    <div className="text-sm text-muted-foreground mb-3">
+                    <div className="text-xs sm:text-sm text-muted-foreground mb-3">
                         Otras cajas activas
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
                         {otrasCajas.map(turno => (
                             <CajaActivaCard key={turno.turno.id} turno={turno} />
                         ))}
@@ -190,68 +195,75 @@ function CajaActivaCard({ turno, destacada }: { turno: TurnoActivo, destacada?: 
 
     return (
         <Card className={destacada ? 'border-2' : ''}>
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 sm:pb-3">
                 <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3">
-                        <div className="p-2 bg-muted rounded-lg">
-                            <Wallet className="h-5 w-5" />
+                    <div className="flex items-start gap-2 sm:gap-3">
+                        <div className="p-1.5 sm:p-2 bg-muted rounded-lg">
+                            <Wallet className="h-4 w-4 sm:h-5 sm:w-5" />
                         </div>
                         <div>
-                            <CardTitle className="text-lg">{turno.turno.caja_nombre}</CardTitle>
-                            <div className="text-sm text-muted-foreground flex items-center gap-1">
+                            <CardTitle className="text-base sm:text-lg">{turno.turno.caja_nombre}</CardTitle>
+                            <div className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1">
                                 <User className="h-3 w-3" />
                                 {turno.turno.usuario_nombre}
                             </div>
                         </div>
                     </div>
-                    <Badge className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100">
+                    <Badge className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100 text-[10px] sm:text-xs px-1.5 sm:px-2">
                         Abierta
                     </Badge>
                 </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3 sm:space-y-4">
                 {/* Hora apertura */}
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Clock className="h-4 w-4" />
+                <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     Apertura: {horaApertura}
                 </div>
 
-                {/* Saldo principal */}
-                <div className="bg-muted/50 rounded-lg p-4">
-                    <p className="text-sm text-muted-foreground">Saldo en Caja</p>
-                    <p className="text-3xl font-bold">
-                        S/ {turno.estadisticas.total_esperado_pen.toFixed(2)}
+                {/* Saldo principal - EFECTIVO TEÓRICO */}
+                <div className="bg-muted/50 rounded-lg p-3 sm:p-4">
+                    <div className="flex justify-between items-start mb-1">
+                        <p className="text-xs sm:text-sm text-muted-foreground">Efectivo en Caja</p>
+                        <Badge variant="outline" className="text-[10px] h-4 px-1 py-0">Teórico</Badge>
+                    </div>
+                    <p className="text-2xl sm:text-3xl font-bold">
+                        S/ {(turno.turno.monto_apertura_efectivo + (turno.estadisticas.desglose_metodos_pago?.efectivo || 0)).toFixed(2)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-1 text-right">
+                        Balance Total: S/ {turno.estadisticas.total_esperado_pen.toFixed(2)}
                     </p>
                 </div>
 
                 {/* Stats */}
-                <div className="grid grid-cols-3 gap-4 text-center text-sm">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center text-xs sm:text-sm">
                     <div>
-                        <p className="text-muted-foreground text-xs">$ Inicial</p>
-                        <p className="font-medium">S/ {turno.turno.monto_apertura_efectivo.toFixed(0)}</p>
+                        <p className="text-muted-foreground text-[10px] sm:text-xs">$ Inicial</p>
+                        <p className="font-medium text-sm sm:text-base">S/ {turno.turno.monto_apertura_efectivo.toFixed(0)}</p>
                     </div>
                     <div>
-                        <p className="text-muted-foreground text-xs flex items-center justify-center gap-1">
-                            <TrendingUp className="h-3 w-3" /> Ingresos
+                        <p className="text-muted-foreground text-[10px] sm:text-xs flex items-center justify-center gap-0.5 sm:gap-1">
+                            <TrendingUp className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> Ingresos
                         </p>
-                        <p className="font-medium text-green-600">
+                        <p className="font-medium text-green-600 text-sm sm:text-base">
                             +S/ {turno.estadisticas.total_ingresos_pen.toFixed(0)}
                         </p>
                     </div>
                     <div>
-                        <p className="text-muted-foreground text-xs flex items-center justify-center gap-1">
-                            <TrendingDown className="h-3 w-3" /> Egresos
+                        <p className="text-muted-foreground text-[10px] sm:text-xs flex items-center justify-center gap-0.5 sm:gap-1">
+                            <TrendingDown className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> Egresos
                         </p>
-                        <p className="font-medium text-red-600">
+                        <p className="font-medium text-red-600 text-sm sm:text-base">
                             -S/ {turno.estadisticas.total_egresos_pen.toFixed(0)}
                         </p>
                     </div>
                 </div>
 
                 {/* Botón gestionar */}
-                <Button className="w-full" asChild>
+                <Button className="w-full" asChild size="sm">
                     <Link href={`/cajas/gestionar/${turno.turno.id}`}>
-                        Gestionar / Arquear
+                        <span className="hidden sm:inline">Gestionar / Arquear</span>
+                        <span className="sm:hidden">Gestionar</span>
                         <ArrowRight className="ml-2 h-4 w-4" />
                     </Link>
                 </Button>
